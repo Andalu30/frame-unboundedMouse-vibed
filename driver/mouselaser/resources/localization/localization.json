@@ -1,0 +1,20 @@
+[
+  {
+    "language_tag": "en_US",
+    "mouselaser": "Mouse Laser",
+    "/input/trigger": "Left Click",
+    "/input/a": "Right Click",
+    "/input/b": "Middle Click",
+    "/input/grip": "Laser Mode (held while active)",
+    "/input/thumbstick": "Mouse Wheel"
+  },
+  {
+    "language_tag": "es_ES",
+    "mouselaser": "Láser de ratón",
+    "/input/trigger": "Clic izquierdo",
+    "/input/a": "Clic derecho",
+    "/input/b": "Clic central",
+    "/input/grip": "Modo láser (activo mientras está encendido)",
+    "/input/thumbstick": "Rueda del ratón"
+  }
+]

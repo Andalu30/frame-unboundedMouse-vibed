@@ -1,0 +1,20 @@
+{
+	"driver_mouselaser": {
+		"enable": true,
+		"sensitivity": 0.05,
+		"toggleButton": 276,
+		"role": 1,
+		"deviceNameFilter": "",
+		"originOffsetY": -0.08,
+		"invertY": false,
+		"wheelMode": "smooth",
+		"wheelDeflection": 1.0,
+		"wheelSmoothMin": 0.7,
+		"wheelSmoothImpulse": 0.3,
+		"wheelSmoothHoldMs": 80,
+		"wheelSmoothDecayMs": 150,
+		"wheelPressMs": 90,
+		"wheelReleaseMs": 60,
+		"wheelMaxQueued": 10
+	}
+}

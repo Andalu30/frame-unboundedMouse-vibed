@@ -1,0 +1,21 @@
+{
+	"jsonid" : "input_profile",
+	"controller_type" : "mouselaser",
+	"device_class" : "TrackedDeviceClass_Controller",
+	"resource_root" : "mouselaser",
+	"driver_name" : "mouselaser",
+	"input_bindingui_mode" : "controller_handed",
+	"should_show_binding_errors" : true,
+	"input_source" : {
+		"/input/trigger" : { "type" : "trigger", "click" : true, "value" : true, "binding_image_point" : [ 50, 50 ], "order" : 1 },
+		"/input/a" : { "type" : "button", "click" : true, "binding_image_point" : [ 50, 50 ], "order" : 2 },
+		"/input/b" : { "type" : "button", "click" : true, "binding_image_point" : [ 50, 50 ], "order" : 3 },
+		"/input/grip" : { "type" : "button", "click" : true, "binding_image_point" : [ 50, 50 ], "order" : 4 },
+		"/input/thumbstick" : { "type" : "joystick", "touch" : true, "binding_image_point" : [ 50, 50 ], "order" : 5 },
+		"/pose/raw" : { "type" : "pose", "binding_image_point" : [ 50, 50 ] },
+		"/pose/tip" : { "type" : "pose", "binding_image_point" : [ 50, 50 ] }
+	},
+	"default_bindings" : [
+		{ "app_key" : "openvr.component.vrcompositor", "binding_url" : "vrcompositor_bindings_mouselaser.json" }
+	]
+}

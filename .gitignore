@@ -1,0 +1,5 @@
+# Build output (build locally, see README)
+/build/
+/driver/mouselaser/bin/
+
+.cache
