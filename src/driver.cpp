@@ -6,7 +6,8 @@
 // mouse is grabbed (EVIOCGRAB) so gamescope stops seeing it; while inactive the device
 // stays connected (so the compositor keeps it as a pointer source), but parks its ray
 // pointing at the sky and releases every button.
-// It registers as a stylus, not a hand, so it never takes a real controller's hand slot.
+// It is a stylus while off, so it never takes a real controller's hand slot, and switches to
+// a hand role while on, because the compositor only drags overlays with hands (or the head).
 //
 // EXPERIMENTAL and AI-generated ("vibecoded"); see README.md before relying on it.
 
@@ -33,7 +34,7 @@
 using namespace vr;
 
 static const char *k_section = "driver_mouselaser";
-static const char *k_version = "0.5.0-experimental";
+static const char *k_version = "0.5.1-experimental";
 
 static void Log(const char *fmt, ...)
 {
@@ -60,6 +61,9 @@ struct Settings
     // Stylus (5) gets its own /user/stylus path. A hand role (1/2) shares the slot with the
     // real controller of that hand, so the device disconnects while off (pre-0.5.0 behaviour).
     int role = TrackedControllerRole_Stylus;
+    // Role while laser mode is on (0 = keep `role`). The compositor attaches dragged overlays
+    // to /user/hand/{left,right} or /user/head only, so a stylus drag follows the head.
+    int activeRole = TrackedControllerRole_LeftHand;
     std::string nameFilter;      // substring of the evdev name; empty = first mouse found
     float originOffsetY = -0.08f; // metres, world space, relative to the HMD
     bool invertY = false;
@@ -88,6 +92,8 @@ struct Settings
         if (err == VRSettingsError_None) backButton = i;
         i = s->GetInt32(k_section, "role", &err);
         if (err == VRSettingsError_None) role = i;
+        i = s->GetInt32(k_section, "activeRole", &err);
+        if (err == VRSettingsError_None) activeRole = i;
         char buf[256] = {};
         s->GetString(k_section, "deviceNameFilter", buf, sizeof(buf), &err);
         if (err == VRSettingsError_None) nameFilter = buf;
@@ -359,12 +365,14 @@ public:
     {
         m_id = id;
         PropertyContainerHandle_t c = VRProperties()->TrackedDeviceToPropertyContainer(id);
+        m_container = c;
         VRProperties()->SetStringProperty(c, Prop_ModelNumber_String, "Mouse Laser (virtual)");
         VRProperties()->SetStringProperty(c, Prop_ManufacturerName_String, "frame-unboundedMouse-vibed");
         VRProperties()->SetStringProperty(c, Prop_ControllerType_String, "mouselaser");
         VRProperties()->SetStringProperty(c, Prop_InputProfilePath_String, "{mouselaser}/input/mouselaser_profile.json");
         VRProperties()->SetStringProperty(c, Prop_RenderModelName_String, "{mouselaser}mouselaser_none");
         VRProperties()->SetInt32Property(c, Prop_ControllerRoleHint_Int32, m_settings.role);
+        m_currentRole = m_settings.role;
         VRProperties()->SetBoolProperty(c, Prop_DeviceProvidesBatteryStatus_Bool, false);
 
         VRDriverInput()->CreateBooleanComponent(c, "/input/trigger/click", &m_trigger);
@@ -421,6 +429,17 @@ public:
         // invalid is dropped as the laser pointer until a new "user interaction" (about 10 s of
         // quiet), so a quick off/on would grab the mouse with no laser.
         bool present = active || IsRoleAllowedAsHand(ETrackedControllerRole(m_settings.role));
+        if (active != m_wasActive)
+        {
+            m_wasActive = active;
+            int role = active && m_settings.activeRole > 0 ? m_settings.activeRole : m_settings.role;
+            if (role != m_currentRole)
+            {
+                m_currentRole = role;
+                VRProperties()->SetInt32Property(m_container, Prop_ControllerRoleHint_Int32, role);
+                Log("role %d\n", role);
+            }
+        }
         if (m_mouse.toggled.exchange(false) && active && hmd.bPoseIsValid)
         {
             // Start the ray where the user is looking.
@@ -479,6 +498,9 @@ private:
     Settings m_settings;
     MouseReader m_mouse;
     uint32_t m_id = k_unTrackedDeviceIndexInvalid;
+    PropertyContainerHandle_t m_container = k_ulInvalidPropertyContainer;
+    bool m_wasActive = false;
+    int m_currentRole = 0;
     std::mutex m_poseMutex;
     DriverPose_t m_pose = {};
     float m_yaw = 0, m_pitch = 0;

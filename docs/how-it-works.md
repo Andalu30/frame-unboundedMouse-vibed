@@ -13,7 +13,7 @@ vrserver
             └─ RunFrame()          ── pose + input components, every vrserver frame
 vrcompositor
  └─ uses resources/input/vrcompositor_bindings_mouselaser.json (via the profile's default_bindings)
-     /actions/lasermouse/in/Pointer ← /user/stylus/pose/raw (or /user/hand/{left,right} for hand roles) → the laser
+     /actions/lasermouse/in/Pointer ← /user/hand/left/pose/raw while on (activeRole), /user/stylus/... while off → the laser
 ```
 
 ### Why `alwaysActivate: true`
@@ -39,6 +39,8 @@ vrcompositor
   - **hand (1/2):** `deviceIsConnected = false` and `poseIsValid = false`, so the real controller of that hand gets its slot back. A connected device with a hand role would compete with it.
 
 ### Role and user path
+Since 0.5.1 the role changes with laser mode. The device registers with `role` (default stylus, 5). On each toggle, `RunFrame` sets `Prop_ControllerRoleHint_Int32` to `activeRole` (default left hand, 1) when switching on, or back to `role` when switching off, and logs `role N`. This is needed because dragging overlays only works with a hand (see below and the primer). SteamVR applies the change live: each switch is followed by `event 108` (role changed), and the owner reports laser and dragging working with 0.5.1.
+
 SteamVR gives each controller a `/user/...` path based on its role. Hand roles share `/user/hand/left|right` with the real controllers. `TrackedControllerRole_Stylus` (5) maps to `/user/stylus`, which `IsRoleAllowedAsHand()` rules out of hand selection. Treadmill (4) maps to `/user/treadmill`. OptOut (3) has no path unless a tracker role is assigned in SteamVR. The compositor's laser accepts pose sources that aren't hands (the Frame HMD binds `/user/head/pose/raw` to `lasermouse/in/pointer`), so the bindings repeat every hand entry for `/user/stylus`.
 
 ### Event diagnostics

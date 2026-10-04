@@ -212,7 +212,7 @@ A controller declares a **role**, and the role decides its **user path**. User p
 
 `IsRoleAllowedAsHand()` in the header returns true only for Invalid, LeftHand and RightHand. Other user paths SteamVR knows about include `/user/head`, `/user/hand/secondary`, `/user/keyboard`, `/user/waist`, `/user/foot/...`, `/user/knee/...` and the Vive tracker role paths.
 
-**Why this mattered for us:** up to 0.4.x, `mouselaser` registered as the **left hand**. Whenever it was connected it competed with your real left controller for `/user/hand/left`, and one of them lost its laser. 0.5.0 registers as a **stylus**, which has its own slot.
+**Why this mattered for us:** up to 0.4.x, `mouselaser` registered as the **left hand**. Whenever it was connected it competed with your real left controller for `/user/hand/left`, and one of them lost its laser. 0.5.0 registered as a **stylus**, which has its own slot, but a stylus can't drag overlays (section 8). Since 0.5.1 it is a stylus while laser mode is off and switches to the left hand while it's on. **The role hint can be changed while SteamVR runs:** update `Prop_ControllerRoleHint_Int32`, and SteamVR re-assigns roles and sends `TrackedDeviceRoleChanged` (108).
 
 ### Activity events
 SteamVR tracks whether each device is in use and sends events about it. Ones we've seen and care about:
@@ -224,7 +224,7 @@ SteamVR tracks whether each device is in use and sends events about it. Ones we'
 | `TrackedDeviceRoleChanged` | 108 | Hand assignments changed. |
 | `PropertyChanged` | 111 | A device property changed. Many at startup. |
 
-These matter because **the compositor uses them to decide which device drives the laser** (section 8). A driver can see them with `VRServerDriverHost()->PollNextEvent()`. 0.5.0 logs them as `mouselaser: event N device M`.
+These matter because **the compositor uses them to decide which device drives the laser** (section 8). A driver can see them with `VRServerDriverHost()->PollNextEvent()`. Since 0.5.0 the driver logs them as `mouselaser: event N device M`. One unexplained observation: our device gets 100/101 on every toggle even though it stays connected.
 
 ---
 
@@ -297,6 +297,9 @@ This is the least documented part. It's all inferred from behaviour, logs and st
 - **Observed (0.4.x captures):** a device that **disconnects or reports an invalid pose is dropped as the pointer device**, and isn't picked up again until SteamVR sees a new "user interaction started". That took about 10 s of quiet. A quick off/on toggle therefore left the mouse grabbed with no laser. That's why 0.5.0 keeps the device connected with a valid pose (parked pointing at the sky) while laser mode is off.
 - The compositor also has settings like `modalGamepadAndLaser` and `laserMouseDebugging` in SteamVR's default settings. We haven't experimented with them.
 
+### Dragging overlays needs a hand (or the head)
+The laser's *aim* comes from the `Pointer` action, which any user path can feed. **Grabbing and moving** an overlay (the dashboard, floating windows) is done by the compositor's scene graph (`CGrabTransform`), which attaches the overlay to a *device*. The only device paths in `vrcompositor` are `/user/hand/left`, `/user/hand/right` and `/user/head`. A `/user/stylus` pointer can aim and click, but a drag follows the **head**. Tested with 0.5.0, see the development log, entry 17. That's why 0.5.1 becomes a hand while laser mode is on.
+
 ### Other ways into the laser (considered, not used)
 - **The `lasermouse` mailbox.** SteamVR has an internal message bus served by vrserver as a WebSocket on `ws://127.0.0.1:27062` (local only). The compositor listens on a mailbox called `lasermouse` with messages such as `dump_laser_overlays`, `force_activate_laser_mouse` and `remote_laser_mouse_events`. The last one is how **VRLink** (PC↔headset streaming) sends laser input. Its payload is an undocumented protobuf, so it's a dead end without reverse engineering. Protocol details are in [steam-frame-background.md](steam-frame-background.md).
 - **Gamescope flags** (`--mouse-sensitivity`, `--force-grab-cursor`). These only change behaviour *inside* one overlay.
@@ -344,7 +347,7 @@ mouse ─► /dev/input/event5 (evdev)
 
 With all of the above, the driver is short. Details are in [how-it-works.md](how-it-works.md).
 
-1. **Provider** (`alwaysActivate` driver) adds one device: class `Controller`, controller type `mouselaser`, role **Stylus** (since 0.5.0).
+1. **Provider** (`alwaysActivate` driver) adds one device: class `Controller`, controller type `mouselaser`. Its role is **Stylus** while laser mode is off and **left hand** while it's on (0.5.1, to allow dragging overlays).
 2. **Mouse thread** finds the first evdev device with relative X/Y and a left button. The forward side button toggles laser mode and `EVIOCGRAB`.
 3. **Every frame** (`RunFrame`):
    - Position = HMD position, a little lower (`originOffsetY`).
@@ -363,7 +366,7 @@ With all of the above, the driver is short. Details are in [how-it-works.md](how
 | **Bump the version string on every change.** | It's the only quick way to know which build is running. We once lost track: git was reverted but the old `.so` was still in place, and the log showed `0.4.3` while the source said `0.4.0`. The `.so` is gitignored, so reverting git doesn't touch it. |
 | **A crash in the driver takes SteamVR down.** | The driver runs inside `vrserver`. Keep SSH/RDP ready, know the [recovery steps](../README.md#recovery), and never let a joinable `std::thread` be destroyed (that calls `std::terminate`). |
 | **Don't disconnect or invalidate the pointer device to "turn it off".** | The compositor drops it as the laser pointer, and only takes it back after a new user interaction (about 10 s of quiet). |
-| **Don't register as a hand unless you want to replace that hand.** | Hand slots are exclusive; the real controller loses its laser. |
+| **Don't register as a hand unless you want to replace that hand.** | Hand slots are exclusive; the real controller loses its laser. If you need hand-only features, such as dragging overlays, switch the role hint to a hand only while you need it. |
 | **Saved user bindings beat the driver's defaults.** | If a binding change "does nothing", look for a saved copy. |
 | **Benign log noise:** `Driver mouselaser has no suitable devices`, and `steam.client (mouselaser) has no configured binding`. | The first is logged because our driver provides no HMD; the device is added right after. The second, because only compositor bindings are shipped (Steam's own Frame binding is haptics only anyway). |
 | **SteamVR adds the driver name to log lines itself.** | Logging `"mouselaser: ..."` yourself gives `mouselaser: mouselaser: ...`. |
@@ -447,7 +450,7 @@ XDG_RUNTIME_DIR=/run/user/1000 systemctl --user status gamescope-session
 ---
 
 ## 15. Open questions
-- **Does the compositor accept a `/user/stylus` pointer?** 0.5.0's first run shows it toggling and receiving interaction events, but the on-headset verdict is pending. See [development-log.md](development-log.md).
+- **Stylus role:** the compositor accepts a `/user/stylus` pointer for aiming and clicking, but not for dragging overlays (see section 8). Switching role at runtime (stylus while off, hand while on) works (0.5.1). The cost: while laser mode is on, the real left controller loses its laser, because the mouse holds the left-hand slot.
 - **Exactly how the compositor picks the pointer device.** Is it interaction events, `SwitchLaserHand`, or something else? The 0.5.0 event logging is meant to answer this.
 - **Is there a driver-side signal for "the laser is up"?** It would let the driver grab the mouse only when the laser actually works.
 - **The mailbox.** Does it need a `?secret=`, and what does `dump_laser_overlays` return?

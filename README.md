@@ -15,7 +15,7 @@ An experimental SteamVR driver that lets you control the **Steam Frame's laser p
 > - **It runs inside `vrserver`.** A bug in the driver can crash SteamVR. On the Frame, SteamVR is your whole session, so the headset can end up showing nothing until you remove the driver (see [Recovery](#recovery)).
 > - **It grabs your mouse.** While the laser mode is on, the driver takes exclusive control of the mouse (`EVIOCGRAB`), and nothing else receives its input.
 > - **It relies on undocumented behaviour.** It depends on SteamVR internals that Valve can change in any update: the compositor's `lasermouse` action set and Frame-specific bindings.
-> - **No warranty.** Use it at your own risk. Read the code first; it's a single ~400-line file: [`src/driver.cpp`](src/driver.cpp).
+> - **No warranty.** Use it at your own risk. Read the code first; it's a single ~580-line file: [`src/driver.cpp`](src/driver.cpp).
 
 ## What it does
 
@@ -26,7 +26,7 @@ This driver adds a **virtual controller** to SteamVR:
 - **Direction:** aimed by mouse movement.
 - **Buttons:** your mouse buttons.
 
-The compositor then treats it like any other laser-pointing hand.
+The compositor then treats it like any other laser-pointing controller.
 
 | Mouse | Laser mode OFF (default) | Laser mode ON |
 |---|---|---|
@@ -38,7 +38,7 @@ The compositor then treats it like any other laser-pointing hand.
 
 When laser mode turns on, the ray starts where you're looking. When it's off, the virtual device stays connected but parks its ray pointing at the sky with every button released, so your real controllers keep the laser.
 
-Since 0.5.0 the virtual device registers as a **stylus** (`/user/stylus`), not as a hand, so it doesn't take your real left or right controller's slot. This is untested on the headset; see the development log.
+Since 0.5.1 the virtual device is a **stylus** (`/user/stylus`) while laser mode is off, so it doesn't take your real controllers' slots. While laser mode is on it switches to the **left hand** (`activeRole`), because SteamVR only lets hands drag overlays. The owner tested this switch with 0.5.1 and reports it works (see the development log).
 
 ## Requirements
 - A Steam Frame (aarch64, SteamOS VR variant) with SteamVR at `/opt/steamvr`.
@@ -58,7 +58,7 @@ cmake -S . -B build -G Ninja && cmake --build build
 Check that it loaded:
 ```sh
 grep -a 'mouselaser:' ~/.local/share/Steam/logs/vrserver.txt | tail
-# expect: "version 0.5.0-experimental", "activated as device N, role 5", "using /dev/input/eventX (<your mouse>)"
+# expect: "version 0.5.1-experimental", "activated as device N, role 5", "using /dev/input/eventX (<your mouse>)"
 ```
 
 ### Optional: offline wheel test
@@ -81,7 +81,8 @@ Add any of these to `~/.config/openvr/config/steamvr.vrsettings` under a `"drive
 | `sensitivity` | `0.05` | Degrees of ray rotation per mouse count. |
 | `toggleButton` | `276` | evdev key code of the toggle: 276 = BTN_EXTRA (forward), 275 = BTN_SIDE (back). |
 | `backButton` | `275` | evdev key code that sends the laser Back action while laser mode is on (275 = BTN_SIDE). `-1` disables it. |
-| `role` | `5` | 5 = stylus (its own `/user/stylus` path, stays connected, doesn't collide with real controllers). 1 = left hand, 2 = right hand: these share the slot with that real controller and disconnect while laser mode is off (pre-0.5.0 behaviour). |
+| `role` | `5` | Role while laser mode is off. 5 = stylus (its own `/user/stylus` path, stays connected, doesn't collide with real controllers). 1 = left hand, 2 = right hand: these share the slot with that real controller and disconnect while off (pre-0.5.0 behaviour). |
+| `activeRole` | `1` | Role while laser mode is on. 1 = left hand, 2 = right hand: needed to drag overlays (a stylus drag follows your head). `0` keeps `role`. While on, the real controller of that hand loses its laser. |
 | `deviceNameFilter` | `""` | Substring of the evdev mouse name. Empty means the first device with REL_X/REL_Y and BTN_LEFT. |
 | `originOffsetY` | `-0.08` | Ray origin height relative to the HMD, in metres. |
 | `invertY` | `false` | Invert vertical aim. |
@@ -115,12 +116,13 @@ If SteamVR won't come up properly after installing, there are four options:
 | Kernel | `6.18.0-gfbdbca41fd45` |
 | SteamVR | as installed at `/opt/steamvr` on 2026-10-01 |
 | Mouse | MCHOSE G3 A (2.4 GHz, has BTN_SIDE/BTN_EXTRA) |
-| Result | Loads, toggles, aims and clicks across overlays. Reconnects after the mouse sleeps or replugs. The wheel scrolls Steam UI lists like the thumbstick: 0.2.0 worked but felt a bit choppy. 0.3.0's smooth mode was confirmed working by the owner. |
+| Result | Loads, toggles, aims and clicks across overlays. Reconnects after the mouse sleeps or replugs. The wheel scrolls Steam UI lists like the thumbstick: 0.2.0 worked but felt a bit choppy. 0.3.0's smooth mode was confirmed working by the owner. 0.5.1 (stylus while off, left hand while on) reported working by the owner, including quick off/on toggles. |
 
 ## Known limitations
 - The ray starts just below your head (`originOffsetY`) and points where you aim, so you see the beam almost end-on. Expect to rely mostly on the cursor dot on overlays.
-- With `role` 1 or 2, a **real controller holding the same hand role** loses its laser. The default stylus role (5) is meant to avoid this, but that hasn't been tested on the headset yet.
-- The driver logs some SteamVR events (`event N device M`) as diagnostics while the stylus role is being tested.
+- While laser mode is on, the **real controller of the `activeRole` hand loses its laser** (the left one by default; confirmed by the owner). It gets it back when laser mode is switched off. Set `activeRole: 2` to borrow the right hand instead. With `role` 1 or 2 this happens whenever the device is connected.
+- With a stylus role active (`activeRole: 0`), the mouse laser can aim and click but **can't drag overlays**: they follow your head. SteamVR's compositor only drags with hands or the head.
+- The driver logs some SteamVR events (`event N device M`) as diagnostics, including a burst of `event 111` lines at startup.
 - **Wheel feel is approximate.** A wheel isn't a stick: it only sends notches. Smooth mode only *simulates* a held stick, so it still won't feel exactly like a real thumbstick. Tune it with the `wheel*` settings.
 - Settings are only read when SteamVR starts.
 - **Back doesn't reach the KDE desktop.** SteamVR's laser Back goes to SteamVR overlays. Steam's UI handles it, but gamescope doesn't pass it on to the windows it hosts (a real controller's B behaves the same). With laser mode off, the side buttons don't work in KDE either, because the nested KWin's X11 backend drops X buttons 8 and up. See [docs/steam-frame-background.md](docs/steam-frame-background.md).
