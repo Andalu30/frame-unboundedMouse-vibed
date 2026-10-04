@@ -58,6 +58,15 @@ The broader notes from that session (hardware, display pipeline, KDE scale, ultr
 
 14. **Back button, 0.4.0** (2026-10-04). The mouse's back side button (BTN_SIDE, setting `backButton`) is now bound to the compositor's `/actions/lasermouse/in/back`. That is the same action as the right Frame controller's B; right A is `home`. The owner reports Back works in the Steam UI and not on the KDE overlay. Investigating KDE separately (see `steam-frame-background.md`, input path) showed two causes: gamescope doesn't forward SteamVR Back to its windows, and KWin's X11 nested backend drops X buttons 8 and up even with laser mode off. The driver can't fix either one, and nothing was added for it.
 
+15. **Stylus role, 0.5.0** (2026-10-04). Untested on the headset.
+    - Problems: (a) pressing the toggle sometimes grabbed the mouse but the laser flashed briefly or never showed, leaving neither the KDE cursor nor the laser; (b) the real left controller's laser conflicted with the virtual device.
+    - An earlier session tried 0.4.1 (delay before pressing the grip), 0.4.2 (stay connected) and 0.4.3 (parked valid pose while off), all as the **left hand**. The owner reverted them from git. Its capture finding is kept: a device whose pose goes invalid or disconnects is dropped as the compositor's laser pointer until a new "user interaction started", so a quick off/on fails. Staying connected as the left hand caused conflict (b).
+    - Change: `role` now defaults to **Stylus (5)**, whose user path is `/user/stylus` and which is never a hand. The bindings repeat every hand entry for `/user/stylus` (the HMD's own binding shows the compositor laser accepts pose sources that aren't hands). With a role other than a hand, the device stays connected with a valid pose, parked straight up while off. Hand roles keep the old disconnect-while-off behaviour. The profile's binding UI mode is `single_device`.
+    - Added logging of SteamVR events about our device, plus interaction, role and dashboard events, to look for a "laser is up" signal. Grabbing the mouse only once the laser is up (or releasing the grab automatically) needs that signal; nothing is gated yet.
+    - Open question: whether vrcompositor's laser actually picks a `/user/stylus` pointer, and whether "quick mouse" via `/user/stylus/input/grip` brings the laser up.
+
+16. **SteamVR primer** (2026-10-04). Added `docs/steamvr-primer.md`, an accessible overview for developers new to SteamVR. It gathers the parent exploration notes (01–09), this repo's docs and new checks on the headset. New facts recorded there: `frame_hmd` and `frame_controller` are resource-only, and the `cv` driver adds the headset and both controllers. Also the full list of compositor action sets, the controller roles and their user paths, and the `vrcmd` options.
+
 ## State at hand-off
 - The driver is registered from this repo (`<repo>/driver/mouselaser`). The old prototype registration has been removed.
 - Nothing is vendored. The build depends on SteamVR's bundled header.

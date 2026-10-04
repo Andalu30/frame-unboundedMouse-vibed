@@ -6,6 +6,7 @@ Context for AI coding sessions on this repo. Read it before changing anything.
 `mouselaser` is an experimental, **AI-written ("vibecoded")** SteamVR driver for the Steam Frame. It adds a virtual controller whose pose is aimed by a physical mouse, so the mouse can drive SteamVR's laser pointer across all overlays. Start with:
 - [README.md](README.md): usage, settings, recovery.
 - [docs/development-log.md](docs/development-log.md): where this came from, what was verified, what's next.
+- [docs/steamvr-primer.md](docs/steamvr-primer.md): SteamVR and Steam Frame concepts for newcomers.
 - [docs/how-it-works.md](docs/how-it-works.md): internals.
 - [docs/steam-frame-background.md](docs/steam-frame-background.md): the Frame's display and input stack, and why this approach was chosen.
 

@@ -4,7 +4,9 @@
 //
 // Toggle with the mouse's forward side button (BTN_EXTRA by default). While active the
 // mouse is grabbed (EVIOCGRAB) so gamescope stops seeing it; while inactive the device
-// reports disconnected and the real controllers keep the laser.
+// stays connected (so the compositor keeps it as a pointer source), but parks its ray
+// pointing at the sky and releases every button.
+// It registers as a stylus, not a hand, so it never takes a real controller's hand slot.
 //
 // EXPERIMENTAL and AI-generated ("vibecoded"); see README.md before relying on it.
 
@@ -31,7 +33,7 @@
 using namespace vr;
 
 static const char *k_section = "driver_mouselaser";
-static const char *k_version = "0.4.0-experimental";
+static const char *k_version = "0.5.0-experimental";
 
 static void Log(const char *fmt, ...)
 {
@@ -55,7 +57,9 @@ struct Settings
     float sensitivityDeg = 0.05f; // degrees of ray rotation per mouse count
     int toggleButton = BTN_EXTRA;
     int backButton = BTN_SIDE;    // sends the compositor's laser "back"; -1 = none
-    int role = TrackedControllerRole_LeftHand;
+    // Stylus (5) gets its own /user/stylus path. A hand role (1/2) shares the slot with the
+    // real controller of that hand, so the device disconnects while off (pre-0.5.0 behaviour).
+    int role = TrackedControllerRole_Stylus;
     std::string nameFilter;      // substring of the evdev name; empty = first mouse found
     float originOffsetY = -0.08f; // metres, world space, relative to the HMD
     bool invertY = false;
@@ -400,6 +404,9 @@ public:
         return m_pose;
     }
 
+    uint32_t Id() const { return m_id; }
+    bool Active() const { return m_mouse.active; }
+
     void RunFrame()
     {
         if (m_id == k_unTrackedDeviceIndexInvalid) return;
@@ -409,6 +416,11 @@ public:
         const HmdMatrix34_t &m = hmd.mDeviceToAbsoluteTracking;
 
         bool active = m_mouse.active;
+        // A hand role would steal the real controller's slot while connected, so it only
+        // connects while active. Other roles stay connected: a device that disappears or goes
+        // invalid is dropped as the laser pointer until a new "user interaction" (about 10 s of
+        // quiet), so a quick off/on would grab the mouse with no laser.
+        bool present = active || IsRoleAllowedAsHand(ETrackedControllerRole(m_settings.role));
         if (m_mouse.toggled.exchange(false) && active && hmd.bPoseIsValid)
         {
             // Start the ray where the user is looking.
@@ -426,15 +438,16 @@ public:
         DriverPose_t pose = {};
         pose.qWorldFromDriverRotation.w = 1;
         pose.qDriverFromHeadRotation.w = 1;
-        pose.deviceIsConnected = active;
-        pose.poseIsValid = active && hmd.bPoseIsValid;
+        pose.deviceIsConnected = present;
+        pose.poseIsValid = present && hmd.bPoseIsValid;
         pose.result = pose.poseIsValid ? TrackingResult_Running_OK : TrackingResult_Running_OutOfRange;
         pose.vecPosition[0] = m.m[0][3];
         pose.vecPosition[1] = m.m[1][3] + m_settings.originOffsetY;
         pose.vecPosition[2] = m.m[2][3];
-        // q = yaw(Y) * pitch(X)
-        float cy = cosf(m_yaw / 2), sy = sinf(m_yaw / 2);
-        float cp = cosf(m_pitch / 2), sp = sinf(m_pitch / 2);
+        // q = yaw(Y) * pitch(X). While off the ray is parked straight up, where it hits nothing.
+        float yaw = active ? m_yaw : 0.f, pitch = active ? m_pitch : float(M_PI) / 2;
+        float cy = cosf(yaw / 2), sy = sinf(yaw / 2);
+        float cp = cosf(pitch / 2), sp = sinf(pitch / 2);
         pose.qRotation.w = cy * cp;
         pose.qRotation.x = cy * sp;
         pose.qRotation.y = sy * cp;
@@ -508,8 +521,21 @@ public:
     void RunFrame() override
     {
         if (m_device) m_device->RunFrame();
+        // Diagnostics: events about our device, and the global ones that decide which device
+        // the compositor treats as the laser. There is no direct "laser is up" signal.
         VREvent_t ev;
-        while (VRServerDriverHost()->PollNextEvent(&ev, sizeof(ev))) {}
+        while (VRServerDriverHost()->PollNextEvent(&ev, sizeof(ev)))
+        {
+            bool ours = m_device && ev.trackedDeviceIndex == m_device->Id();
+            bool global = ev.eventType == VREvent_TrackedDeviceUserInteractionStarted ||
+                          ev.eventType == VREvent_TrackedDeviceUserInteractionEnded ||
+                          ev.eventType == VREvent_TrackedDeviceRoleChanged ||
+                          ev.eventType == VREvent_DashboardActivated ||
+                          ev.eventType == VREvent_DashboardDeactivated;
+            if (ours || global)
+                Log("event %u device %u (%s)\n", ev.eventType, ev.trackedDeviceIndex,
+                    m_device && m_device->Active() ? "active" : "off");
+        }
     }
 
     bool ShouldBlockStandbyMode() override { return false; }

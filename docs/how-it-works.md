@@ -13,7 +13,7 @@ vrserver
             └─ RunFrame()          ── pose + input components, every vrserver frame
 vrcompositor
  └─ uses resources/input/vrcompositor_bindings_mouselaser.json (via the profile's default_bindings)
-     /actions/lasermouse/in/Pointer ← /user/hand/{left,right}/pose/raw   → the laser
+     /actions/lasermouse/in/Pointer ← /user/stylus/pose/raw (or /user/hand/{left,right} for hand roles) → the laser
 ```
 
 ### Why `alwaysActivate: true`
@@ -34,7 +34,15 @@ vrcompositor
 - Mouse deltas: `yaw -= dx·k`, `pitch -= dy·k` (sign flipped if `invertY`), where `k = sensitivity·π/180`. Pitch is clamped to ±89°.
 - Orientation is **world-locked**: `q = yaw(Y) · pitch(X)` = `(cy·cp, cy·sp, sy·cp, −sy·sp)` with half-angle sines and cosines. OpenVR controllers point along −Z, so this aims the ray.
 - Position = HMD position + `(0, originOffsetY, 0)` in world space.
-- When inactive: `deviceIsConnected = false` and `poseIsValid = false`, so the compositor falls back to the real controllers.
+- When inactive, it depends on `role`:
+  - **stylus (5, default since 0.5.0):** the device stays connected with a valid pose, but its ray is parked pointing straight up (yaw 0, pitch 90°) and every button is released. This matters because a device that goes invalid or disconnects is dropped as the laser pointer until SteamVR sees a new "user interaction". That took about 10 s of quiet in earlier captures, so a quick off/on left the mouse grabbed with no laser.
+  - **hand (1/2):** `deviceIsConnected = false` and `poseIsValid = false`, so the real controller of that hand gets its slot back. A connected device with a hand role would compete with it.
+
+### Role and user path
+SteamVR gives each controller a `/user/...` path based on its role. Hand roles share `/user/hand/left|right` with the real controllers. `TrackedControllerRole_Stylus` (5) maps to `/user/stylus`, which `IsRoleAllowedAsHand()` rules out of hand selection. Treadmill (4) maps to `/user/treadmill`. OptOut (3) has no path unless a tracker role is assigned in SteamVR. The compositor's laser accepts pose sources that aren't hands (the Frame HMD binds `/user/head/pose/raw` to `lasermouse/in/pointer`), so the bindings repeat every hand entry for `/user/stylus`.
+
+### Event diagnostics
+The provider logs SteamVR events about our device, plus user-interaction, role-change and dashboard events (`event N device M (active|off)`). There is no driver-side signal for "the laser is up", and these events are what we're watching to look for one.
 
 ### RunFrame (inputs)
 | component | driven by | bound to (compositor) |

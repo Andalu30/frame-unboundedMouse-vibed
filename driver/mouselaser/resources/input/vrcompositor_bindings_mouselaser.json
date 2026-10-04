@@ -18,6 +18,10 @@
 				{
 					"output": "/actions/lasermouse/in/pointer",
 					"path": "/user/hand/right/pose/raw"
+				},
+				{
+					"output": "/actions/lasermouse/in/pointer",
+					"path": "/user/stylus/pose/raw"
 				}
 			],
 			"sources": [
@@ -32,6 +36,15 @@
 				},
 				{
 					"path": "/user/hand/right/input/trigger",
+					"mode": "button",
+					"inputs": {
+						"click": {
+							"output": "/actions/lasermouse/in/leftclick"
+						}
+					}
+				},
+				{
+					"path": "/user/stylus/input/trigger",
 					"mode": "button",
 					"inputs": {
 						"click": {
@@ -58,6 +71,15 @@
 					}
 				},
 				{
+					"path": "/user/stylus/input/a",
+					"mode": "button",
+					"inputs": {
+						"click": {
+							"output": "/actions/lasermouse/in/rightclick"
+						}
+					}
+				},
+				{
 					"path": "/user/hand/left/input/b",
 					"mode": "button",
 					"inputs": {
@@ -76,6 +98,15 @@
 					}
 				},
 				{
+					"path": "/user/stylus/input/b",
+					"mode": "button",
+					"inputs": {
+						"click": {
+							"output": "/actions/lasermouse/in/middleclick"
+						}
+					}
+				},
+				{
 					"path": "/user/hand/left/input/back",
 					"mode": "button",
 					"inputs": {
@@ -86,6 +117,15 @@
 				},
 				{
 					"path": "/user/hand/right/input/back",
+					"mode": "button",
+					"inputs": {
+						"click": {
+							"output": "/actions/lasermouse/in/back"
+						}
+					}
+				},
+				{
+					"path": "/user/stylus/input/back",
 					"mode": "button",
 					"inputs": {
 						"click": {
@@ -114,6 +154,15 @@
 							"output": "/actions/lasermouse_secondary/in/switchlaserhand"
 						}
 					}
+				},
+				{
+					"path": "/user/stylus/input/trigger",
+					"mode": "button",
+					"inputs": {
+						"click": {
+							"output": "/actions/lasermouse_secondary/in/switchlaserhand"
+						}
+					}
 				}
 			]
 		},
@@ -136,6 +185,15 @@
 							"output": "/actions/quickmouse/in/ActivateQuickMouse"
 						}
 					}
+				},
+				{
+					"path": "/user/stylus/input/grip",
+					"mode": "button",
+					"inputs": {
+						"click": {
+							"output": "/actions/quickmouse/in/ActivateQuickMouse"
+						}
+					}
 				}
 			]
 		},
@@ -152,6 +210,15 @@
 				},
 				{
 					"path": "/user/hand/right/input/thumbstick",
+					"mode": "scroll",
+					"inputs": {
+						"scroll": {
+							"output": "/actions/scroll_discrete/in/scroll"
+						}
+					}
+				},
+				{
+					"path": "/user/stylus/input/thumbstick",
 					"mode": "scroll",
 					"inputs": {
 						"scroll": {
@@ -186,6 +253,18 @@
 							"output": "/actions/dualanalog/in/righttouch"
 						}
 					}
+				},
+				{
+					"path": "/user/stylus/input/thumbstick",
+					"mode": "joystick",
+					"inputs": {
+						"position": {
+							"output": "/actions/dualanalog/in/rightvalue"
+						},
+						"touch": {
+							"output": "/actions/dualanalog/in/righttouch"
+						}
+					}
 				}
 			]
 		},
@@ -205,6 +284,18 @@
 				},
 				{
 					"path": "/user/hand/right/input/thumbstick",
+					"mode": "scroll",
+					"parameters": {
+						"scroll_mode": "smooth"
+					},
+					"inputs": {
+						"scroll": {
+							"output": "/actions/scroll_smooth/in/scroll"
+						}
+					}
+				},
+				{
+					"path": "/user/stylus/input/thumbstick",
 					"mode": "scroll",
 					"parameters": {
 						"scroll_mode": "smooth"

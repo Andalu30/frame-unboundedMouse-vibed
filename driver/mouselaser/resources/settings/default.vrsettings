@@ -3,7 +3,7 @@
 		"enable": true,
 		"sensitivity": 0.05,
 		"toggleButton": 276,
-		"role": 1,
+		"role": 5,
 		"deviceNameFilter": "",
 		"originOffsetY": -0.08,
 		"invertY": false,
