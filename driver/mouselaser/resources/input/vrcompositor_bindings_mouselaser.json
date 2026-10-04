@@ -4,7 +4,7 @@
 	"app_key": "openvr.component.vrcompositor",
 	"category": "steamvr_input",
 	"controller_type": "mouselaser",
-	"description": "Mouse aims the SteamVR laser. Buttons click, and the wheel acts as the thumbstick (lists and scrolling).",
+	"description": "Mouse aims the SteamVR laser. Buttons click, the back side button goes back, and the wheel acts as the thumbstick (lists and scrolling).",
 	"name": "Mouse Laser: dashboard and overlays",
 	"options": {},
 	"simulated_actions": [],
@@ -72,6 +72,24 @@
 					"inputs": {
 						"click": {
 							"output": "/actions/lasermouse/in/middleclick"
+						}
+					}
+				},
+				{
+					"path": "/user/hand/left/input/back",
+					"mode": "button",
+					"inputs": {
+						"click": {
+							"output": "/actions/lasermouse/in/back"
+						}
+					}
+				},
+				{
+					"path": "/user/hand/right/input/back",
+					"mode": "button",
+					"inputs": {
+						"click": {
+							"output": "/actions/lasermouse/in/back"
 						}
 					}
 				}

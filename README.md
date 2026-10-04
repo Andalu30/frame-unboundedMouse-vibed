@@ -33,6 +33,7 @@ The compositor then treats it like any other laser-pointing hand.
 | Forward side button (BTN_EXTRA) | **Turns laser mode on** | **Turns laser mode off** |
 | Movement | Normal desktop cursor | Aims the laser (world-locked: turning your head doesn't move it) |
 | Left / right / middle button | Normal | Laser click / right click / middle click |
+| Back side button (BTN_SIDE) | Normal | SteamVR's laser **Back**, the same action as the right Frame controller's B button. Works in Steam UI menus; it does not reach the KDE desktop (see Known limitations). |
 | Wheel (and tilt wheel) | Normal | Acts like the controller **thumbstick**. One notch moves one item in Steam UI lists, and spinning the wheel scrolls continuously. It also scrolls the overlay under the laser. |
 
 When laser mode turns on, the ray starts where you're looking. When it's off, the virtual device reports itself as disconnected, so your real controllers keep the laser.
@@ -55,7 +56,7 @@ cmake -S . -B build -G Ninja && cmake --build build
 Check that it loaded:
 ```sh
 grep -a 'mouselaser:' ~/.local/share/Steam/logs/vrserver.txt | tail
-# expect: "version 0.3.1-experimental", "activated as device N, role 1", "using /dev/input/eventX (<your mouse>)"
+# expect: "version 0.4.0-experimental", "activated as device N, role 1", "using /dev/input/eventX (<your mouse>)"
 ```
 
 ### Optional: offline wheel test
@@ -77,6 +78,7 @@ Add any of these to `~/.config/openvr/config/steamvr.vrsettings` under a `"drive
 | `enable` | `true` | `false` loads the driver but adds no device. This is the kill switch. |
 | `sensitivity` | `0.05` | Degrees of ray rotation per mouse count. |
 | `toggleButton` | `276` | evdev key code of the toggle: 276 = BTN_EXTRA (forward), 275 = BTN_SIDE (back). |
+| `backButton` | `275` | evdev key code that sends the laser Back action while laser mode is on (275 = BTN_SIDE). `-1` disables it. |
 | `role` | `1` | 1 = left hand, 2 = right hand. |
 | `deviceNameFilter` | `""` | Substring of the evdev mouse name. Empty means the first device with REL_X/REL_Y and BTN_LEFT. |
 | `originOffsetY` | `-0.08` | Ray origin height relative to the HMD, in metres. |
@@ -95,11 +97,6 @@ Add any of these to `~/.config/openvr/config/steamvr.vrsettings` under a `"drive
 - One notch skips two list items: lower `wheelSmoothHoldMs`.
 - Scrolling stops abruptly: raise `wheelSmoothDecayMs`.
 - Fast spins aren't fast enough: raise `wheelSmoothImpulse`.
-
-## It shows up in SteamVR's "Manage Add-ons"
-This is expected. SteamVR lists every driver that isn't resources-only under **Settings → Developer → Manage Add-ons** (exact menu names may differ). That entry is useful:
-- **Its toggle is a kill switch.** It writes `"driver_mouselaser": {"enable": false}` to `steamvr.vrsettings`, which is the same `enable` setting the driver honours. Takes effect after a reboot.
-- **Safe mode.** SteamVR can block add-ons in "safe mode", apparently when it crashes after they were added. The **Unblock** button on that page re-enables them, once you've fixed or updated the driver.
 
 ## Recovery
 If SteamVR won't come up properly after installing, there are four options:
@@ -123,6 +120,7 @@ If SteamVR won't come up properly after installing, there are four options:
 - If a **real controller holds the same hand role** its own laser pointer seems to stop working.
 - **Wheel feel is approximate.** A wheel isn't a stick: it only sends notches. Smooth mode only *simulates* a held stick, so it still won't feel exactly like a real thumbstick. Tune it with the `wheel*` settings.
 - Settings are only read when SteamVR starts.
+- **Back doesn't reach the KDE desktop.** SteamVR's laser Back goes to SteamVR overlays. Steam's UI handles it, but gamescope doesn't pass it on to the windows it hosts (a real controller's B behaves the same). With laser mode off, the side buttons don't work in KDE either, because the nested KWin's X11 backend drops X buttons 8 and up. See [docs/steam-frame-background.md](docs/steam-frame-background.md).
 - Two harmless log lines:
   - `steam.client (mouselaser) has no configured binding`: only the compositor bindings are provided, and Steam's own binding for the Frame controllers is haptics-only anyway.
   - `Driver mouselaser has no suitable devices`: logged at load time, presumably because the driver provides no HMD. The device is added right after.

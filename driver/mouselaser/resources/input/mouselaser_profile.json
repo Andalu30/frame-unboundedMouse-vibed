@@ -12,6 +12,7 @@
 		"/input/b" : { "type" : "button", "click" : true, "binding_image_point" : [ 50, 50 ], "order" : 3 },
 		"/input/grip" : { "type" : "button", "click" : true, "binding_image_point" : [ 50, 50 ], "order" : 4 },
 		"/input/thumbstick" : { "type" : "joystick", "touch" : true, "binding_image_point" : [ 50, 50 ], "order" : 5 },
+		"/input/back" : { "type" : "button", "click" : true, "binding_image_point" : [ 50, 50 ], "order" : 6 },
 		"/pose/raw" : { "type" : "pose", "binding_image_point" : [ 50, 50 ] },
 		"/pose/tip" : { "type" : "pose", "binding_image_point" : [ 50, 50 ] }
 	},

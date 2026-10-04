@@ -23,6 +23,8 @@ DSI-1 panel (2× 2160x2160 @ 108/120/144 Hz)
 ```
 - KWin on the X11 windowed backend never uses libinput, so KDE's mouse and keyboard settings pages are empty. `/org/kde/KWin/InputDevice` doesn't exist.
 - Gamescope delivers the mouse only to its **focused** overlay, clamped to that surface. **This is the "bounded" mouse the project is named after.**
+- **Back/forward side buttons never reach KDE apps.** Gamescope delivers them fine (X button 8/9 on `:0`, seen with `xinput test-xi2`). KWin 6.2.5's X11 windowed backend (`X11WindowedBackend::handleButtonPress`) then discards every X button above 7: its `default:` branch `return`s. Upstream KWin removed that backend in 2025 without fixing it. KWin's Wayland nested backend passes button codes through unchanged.
+- SteamVR's laser **Back** action (a controller's B, or this driver's back button) only reaches SteamVR overlays such as Steam's UI. Gamescope doesn't translate it for the windows it hosts.
 
 ## The laser pointer
 - The laser belongs to **vrcompositor**. It casts a ray from a *pose* and sends the overlay it hits `VREvent_MouseMove/ButtonDown/ButtonUp/...`. Gamescope turns those into pointer input for its clients.

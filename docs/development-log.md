@@ -56,6 +56,8 @@ The broader notes from that session (hardware, display pipeline, KDE scale, ultr
 
 13. **Demo media** (2026-10-01). The owner recorded `~/Videos/mousedemo.mp4` (44.2 s, 1920×1080, 20 fps). It was trimmed (first 3 s and last 2 s removed, leaving 39.2 s) and converted to `docs/media/demo.webp`, which the README shows as the hero image.
 
+14. **Back button, 0.4.0** (2026-10-04). The mouse's back side button (BTN_SIDE, setting `backButton`) is now bound to the compositor's `/actions/lasermouse/in/back`. That is the same action as the right Frame controller's B; right A is `home`. The owner reports Back works in the Steam UI and not on the KDE overlay. Investigating KDE separately (see `steam-frame-background.md`, input path) showed two causes: gamescope doesn't forward SteamVR Back to its windows, and KWin's X11 nested backend drops X buttons 8 and up even with laser mode off. The driver can't fix either one, and nothing was added for it.
+
 ## State at hand-off
 - The driver is registered from this repo (`<repo>/driver/mouselaser`). The old prototype registration has been removed.
 - Nothing is vendored. The build depends on SteamVR's bundled header.

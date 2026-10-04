@@ -31,7 +31,7 @@
 using namespace vr;
 
 static const char *k_section = "driver_mouselaser";
-static const char *k_version = "0.3.1-experimental";
+static const char *k_version = "0.4.0-experimental";
 
 static void Log(const char *fmt, ...)
 {
@@ -54,6 +54,7 @@ struct Settings
 {
     float sensitivityDeg = 0.05f; // degrees of ray rotation per mouse count
     int toggleButton = BTN_EXTRA;
+    int backButton = BTN_SIDE;    // sends the compositor's laser "back"; -1 = none
     int role = TrackedControllerRole_LeftHand;
     std::string nameFilter;      // substring of the evdev name; empty = first mouse found
     float originOffsetY = -0.08f; // metres, world space, relative to the HMD
@@ -79,6 +80,8 @@ struct Settings
         if (err == VRSettingsError_None) sensitivityDeg = f;
         int32_t i = s->GetInt32(k_section, "toggleButton", &err);
         if (err == VRSettingsError_None) toggleButton = i;
+        i = s->GetInt32(k_section, "backButton", &err);
+        if (err == VRSettingsError_None) backButton = i;
         i = s->GetInt32(k_section, "role", &err);
         if (err == VRSettingsError_None) role = i;
         char buf[256] = {};
@@ -194,7 +197,7 @@ public:
     std::atomic<bool> toggled{false}; // set on every toggle; RunFrame clears it
     std::atomic<int> dx{0}, dy{0};
     std::atomic<int> wheel{0}, hwheel{0};
-    std::atomic<bool> left{false}, right{false}, middle{false};
+    std::atomic<bool> left{false}, right{false}, middle{false}, back{false};
 
     // Destroying a joinable std::thread calls std::terminate (taking vrserver down),
     // so make sure the thread is stopped even if Deactivate() was never called.
@@ -281,7 +284,7 @@ private:
             Log("EVIOCGRAB failed (%s), staying inactive\n", strerror(errno));
             return;
         }
-        left = right = middle = false;
+        left = right = middle = back = false;
         dx = dy = wheel = hwheel = 0;
         active = on;
         toggled = true;
@@ -338,6 +341,7 @@ private:
             if (ev.code == BTN_LEFT) left = ev.value != 0;
             else if (ev.code == BTN_RIGHT) right = ev.value != 0;
             else if (ev.code == BTN_MIDDLE) middle = ev.value != 0;
+            else if (ev.code == m_settings.backButton) back = ev.value != 0;
         }
     }
 };
@@ -364,6 +368,7 @@ public:
                                                VRScalarType_Absolute, VRScalarUnits_NormalizedOneSided);
         VRDriverInput()->CreateBooleanComponent(c, "/input/a/click", &m_a);
         VRDriverInput()->CreateBooleanComponent(c, "/input/b/click", &m_b);
+        VRDriverInput()->CreateBooleanComponent(c, "/input/back/click", &m_back);
         VRDriverInput()->CreateBooleanComponent(c, "/input/grip/click", &m_grip);
         VRDriverInput()->CreateBooleanComponent(c, "/input/thumbstick/touch", &m_stickTouch);
         VRDriverInput()->CreateScalarComponent(c, "/input/thumbstick/x", &m_stickX,
@@ -450,6 +455,7 @@ public:
         VRDriverInput()->UpdateScalarComponent(m_triggerValue, l ? 1.f : 0.f, 0);
         VRDriverInput()->UpdateBooleanComponent(m_a, active && m_mouse.right, 0);
         VRDriverInput()->UpdateBooleanComponent(m_b, active && m_mouse.middle, 0);
+        VRDriverInput()->UpdateBooleanComponent(m_back, active && m_mouse.back, 0);
         VRDriverInput()->UpdateBooleanComponent(m_grip, active, 0); // holds "quick mouse" on
         VRDriverInput()->UpdateBooleanComponent(m_stickTouch, stickX != 0.f || stickY != 0.f, 0);
         VRDriverInput()->UpdateScalarComponent(m_stickX, stickX, 0);
@@ -464,7 +470,7 @@ private:
     DriverPose_t m_pose = {};
     float m_yaw = 0, m_pitch = 0;
     StickStepper m_stepX, m_stepY;
-    VRInputComponentHandle_t m_trigger = 0, m_triggerValue = 0, m_a = 0, m_b = 0, m_grip = 0;
+    VRInputComponentHandle_t m_trigger = 0, m_triggerValue = 0, m_a = 0, m_b = 0, m_back = 0, m_grip = 0;
     VRInputComponentHandle_t m_stickTouch = 0, m_stickX = 0, m_stickY = 0;
 };
 
