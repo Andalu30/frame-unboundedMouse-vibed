@@ -37,6 +37,7 @@ vrcompositor
 - When inactive, it depends on `role`:
   - **stylus (5, default since 0.5.0):** the device stays connected with a valid pose, but its ray is parked pointing straight up (yaw 0, pitch 90°) and every button is released. This matters because a device that goes invalid or disconnects is dropped as the laser pointer until SteamVR sees a new "user interaction". That took about 10 s of quiet in earlier captures, so a quick off/on left the mouse grabbed with no laser.
   - **hand (1/2):** `deviceIsConnected = false` and `poseIsValid = false`, so the real controller of that hand gets its slot back. A connected device with a hand role would compete with it.
+  - ⚠️ **The code does the opposite (found 2026-10-09, confirmed 2026-11-19):** the `present` test in `RunFrame` is inverted (`active || IsRoleAllowedAsHand(role)`). In practice a stylus **disconnects** while off, and a hand role would stay connected. That's why every toggle logs `event 100/101`. The two bullets above describe the intent, not the actual behaviour. 0.6.1 keeps it on purpose, because it's the tested behaviour (see [development-log.md](development-log.md), entries 19 and 22).
 
 ### Role and user path
 Since 0.5.1 the role changes with laser mode. The device registers with `role` (default stylus, 5). On each toggle, `RunFrame` sets `Prop_ControllerRoleHint_Int32` to `activeRole` (default left hand, 1) when switching on, or back to `role` when switching off, and logs `role N`. This is needed because dragging overlays only works with a hand (see below and the primer). SteamVR applies the change live: each switch is followed by `event 108` (role changed), and the owner reports laser and dragging working with 0.5.1.
@@ -52,7 +53,8 @@ The provider logs SteamVR events about our device, plus user-interaction, role-c
 | `/input/trigger/click`, `/value` | left button | `lasermouse/LeftClick`, `lasermouse_secondary/SwitchLaserHand` |
 | `/input/a/click` | right button | `lasermouse/RightClick` |
 | `/input/b/click` | middle button | `lasermouse/MiddleClick` |
-| `/input/grip/click` | held **true** while active | `quickmouse/ActivateQuickMouse` (keeps the laser up, as squeezing a grip does on Frame controllers) |
+| `/input/grip/click` | **pulsed** (`pulseMs`) `claimDelayMs` after switching on, and again while still a hand when switching off | `quickmouse/ActivateQuickMouse`. A grip click **toggles** Laser Mouse ↔ Gamepad mode. Up to 0.5.1 it was held while active, so the mode flipped once per activation and never back (the "needs several presses" bug, D0). Since 0.6.0 the two pulses cancel out. |
+| `/input/bumper/click` | pulsed right after the ON grip pulse (0.6.0) | `lasermouse_secondary/SwitchLaserHand` only: moves the laser to this device. |
 | `/input/thumbstick/y`, `/x` (+ `/touch`) | wheel → Y, tilt wheel → X, via `StickStepper` (see below) | `dualanalog/LeftValue`/`RightValue` (+ touch, mode `joystick`), `scroll_discrete` and `scroll_smooth` (mode `scroll`), the same as the Frame controller's stick |
 
 ### Wheel → thumbstick (`StickStepper`)

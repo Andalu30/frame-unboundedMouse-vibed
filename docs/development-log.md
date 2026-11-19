@@ -74,8 +74,52 @@ The broader notes from that session (hardware, display pipeline, KDE scale, ultr
     - Observation: SteamVR also sends `event 100`/`101` (TrackedDeviceActivated/Deactivated) for our device on every toggle, even though it stays connected. This was already the case with 0.5.0. We don't know what it means, and it causes no visible problem.
     - The owner confirmed the real **left controller loses its laser while laser mode is on**, as expected: the device holds the left-hand slot. It is fine with laser mode off. `activeRole: 2` moves this to the right hand.
 
+19. **Review on SteamOS 0.5.9 and upgrade plan** (2026-11-19). The owner asked for a review of the old assumptions on the current image, a plan to fix "mode switching sometimes needs several side-button presses", and a survey of every way to hook into Steam. The session was read-only on the system. In the repo it added docs, a local log-scoring script and a local build. Nothing was registered.
+    - **Platform moved:** SteamOS 0.5.9 (build 20261113.6134720), kernel 7.2, KWin 6.6.2 (still the X11 windowed backend), gamescope 3.16.30. The mouse is on Bluetooth now. The toolchain is on the image, and `/dev/uinput` is usable by the `input` group. These notes are kept locally.
+    - **The headset ran an old checkout:** SteamVR loaded an older local checkout (0.5.1, built 2026-10-09). This repo builds cleanly against the current header and `wheel_sim` passes.
+    - **Root cause of "needs several presses":** the Frame's grip click (`ActivateQuickMouse`) **toggles** Laser Mouse ↔ Gamepad mode. Steam's own tour text says so. Our driver holds its virtual grip while active, so every activation flips the mode and none flips it back. Activations therefore alternate between working and failing.
+      - The proof uses a "laser shown" proxy: the compositor logs loading `laser_pointer.obj` ~40 ms after a working ON.
+      - The outcome flipped between consecutive ONs 38/42 times, and all 19 no-laser ONs were retried.
+      - A first analysis in this session blamed "cold" activations (≥ 10 s off). That was a confound, because successful ONs are followed by long sessions. It was corrected the same day.
+    - **Defects confirmed in the code:**
+      - D0: the grip is held instead of pulsed (the root cause above).
+      - D1: the inverted `present` test, so the stylus disconnects while off. That contradicts the docs and explains `event 100/101` on every toggle.
+      - D2: the toggle press leaks to gamescope without its release.
+      - D3: a Bluetooth mouse nap cancels laser mode.
+      - D4: the first mouse found wins; it once latched onto a Steam Controller's emulated mouse.
+      - D5: the grip goes down in the same frame as the role switch.
+    - **Outside evidence:** Frametop (MIT) needs a ~300–400 ms settle after a connect or role change, plus a pulse on a button bound only to `SwitchLaserHand`, to claim the laser reliably.
+    - **Hooks found:**
+      - "Debug Input Focus" in SteamVR's developer settings shows the laser/gamepad mode.
+      - The mailbox message `lasermouse ← force_activate_laser_mouse` *forces* laser mode.
+      - Events 525/307/406 might let the driver observe the laser.
+      - gamescope's `vr_click_focus` convar and libei socket.
+    - The plan and the hooks survey are kept locally for now. Step numbers in the entries below (0.3, 1.1–1.8) refer to that plan; each entry says what the step does. Next step: owner decisions, starting with moving the registration to this repo.
+
+
+21. **Registration switch verified** (2026-11-19, 19:54). The headset wasn't rebooted, but SteamVR was restarted.
+    - The log shows `Loaded server driver mouselaser … from ~/Projects/frame-unboundedMouse-vibed/…` (0.5.1, unchanged code), and the bindings load from this repo. No driver errors.
+    - Scoring the new session from the logs (laser render-model loads after each activation): the outcome flipped between consecutive activations **14/14** times. That confirms the grip-toggle model (entry 19) on fresh data. The first activation after the restart worked.
+    - The mouse dropped out three times in 10 minutes. Once it was 30 s into a laser session and back after 4 s, and each dropout ended laser mode (D3). That makes the mouse-nap fix (step 1.7) more urgent.
+22. **0.6.0-experimental: Phase 1 fix, built but NOT yet tested on the headset** (2026-11-19). The owner approved Phase 1 and asked to keep it simple, so there's no helper (1.8).
+    - **1.1 (D0, D5):** a phase machine in `RunFrame`. On: role → hand, wait `claimDelayMs` (200), pulse the grip for `pulseMs` (60), then pulse the bumper. Off: pulse the grip again while still a hand, wait one more `pulseMs`, then go back to the stylus role. The log shows each step (`phase …`).
+    - **1.2:** new `/input/bumper/click`, bound only to `lasermouse_secondary/SwitchLaserHand`.
+    - **1.4:** mouse buttons are latched, so a click shorter than a frame still registers.
+    - **1.6 (D2):** the toggle fires on release. Switching on, gamescope sees one whole forward-button click (which may go "forward" in the focused app). Switching off, it sees nothing.
+    - **1.7, simplified (D3, D4):** if the mouse vanishes while active, laser mode is kept for `reconnectGraceS` (60 s), and the mouse is re-grabbed when it returns. Devices with vendor `28de` or "Steam" in the name are skipped unless `deviceNameFilter` is set. Not done: inotify, reading several mice.
+    - **0.3:** every SteamVR event is logged (first 20 per type, then every 100th), to see whether event 525/307/406 reaches drivers. That decides 1.3.
+    - **Not done:** 1.3 (waits for 0.3's data). 1.5: D1's behaviour (stylus disconnects while off) is kept because it's the tested one; the comment now says so. 1.8 dropped.
+    - Expected: flip rate near 0, and "NO LASER" rare. The `.so` in the repo was rebuilt while SteamVR had the old one loaded, so **reboot before testing**.
+
+23. **0.6.0 tested on the headset, 0.6.1 built** (2026-11-19, 20:20).
+    - **The fix works.** Every activation that reached the grip pulse showed the laser. The three "NO LASER" lines were activations switched off within ~180 ms, before the pulse: they were correctly cancelled and kept the mode's parity. So the report's flip rate (4/10) is not a failure measure any more; look at which ONs reached `phase grip pulse`.
+    - **Too slow.** The laser appeared ~240 ms after the toggle, against ~40 ms in 0.5.1. Almost all of it is `claimDelayMs = 200`; the laser shows ~30 ms after the grip pulse. 0.5.1 pressed the grip in the same frame as the role change and still got the laser, so **0.6.1 lowers the default to 50 ms**. Toggling on release also adds however long the button is held.
+    - **Event survey (0.3):** event 525 (PrimaryDashboardDeviceChanged) **never reaches the driver**. 307 (OverlayFocusChanged) does, but it doesn't say who owns the laser. So 1.3 isn't possible inside the driver; it's dropped along with 1.8.
+
+24. **0.6.1 tested on the headset: the toggle bug is fixed** (2026-11-19, 20:26). 9 activations, all with the laser, about 100 ms after the button is released. The outcome flipped between consecutive activations 0/8 times (0.5.1: 14/14). The owner says it's "totally snappy".
+
 ## State at hand-off
-- The driver is registered from this repo (`<repo>/driver/mouselaser`). The old prototype registration has been removed.
-- Current version: 0.5.1-experimental, tested on the headset (entry 18).
+- **Registered from this repo since 2026-11-19** (owner-approved). The old checkout was unregistered but kept. Verified loading on 2026-11-19 19:54 (entry 21). `vrpathreg adddriver` made KDE show "could not read file vrmonitor://driverinstalled": `vrpathreg` runs `xdg-open` on that URL to notify vrmonitor, and nothing on the Frame handles it. Harmless; vrserver logged a clean connect and disconnect, and the path was saved.
+- Current version: **0.6.1-experimental, tested on the headset** (entry 24). It fixes the toggle bug analysed in entry 19.
 - Nothing is vendored. The build depends on SteamVR's bundled header.
 - Licensed MIT (see `LICENSE`). SPDX tags are on the sources.

@@ -2,10 +2,11 @@
 // mouselaser: a virtual SteamVR controller whose pose is aimed by a physical mouse,
 // so the SteamVR laser pointer can be driven by the mouse across every overlay.
 //
-// Toggle with the mouse's forward side button (BTN_EXTRA by default). While active the
-// mouse is grabbed (EVIOCGRAB) so gamescope stops seeing it; while inactive the device
-// stays connected (so the compositor keeps it as a pointer source), but parks its ray
-// pointing at the sky and releases every button.
+// Toggle with the mouse's forward side button (BTN_EXTRA by default, on release). While
+// active the mouse is grabbed (EVIOCGRAB) so gamescope stops seeing it. Switching on and
+// off pulses the grip once each (SteamVR's Laser Mouse <-> Gamepad toggle), so the mode
+// always ends up where it started. While inactive the ray is parked at the sky and, as a
+// stylus, the device reports itself disconnected.
 // It is a stylus while off, so it never takes a real controller's hand slot, and switches to
 // a hand role while on, because the compositor only drags overlays with hands (or the head).
 //
@@ -20,6 +21,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -34,7 +36,7 @@
 using namespace vr;
 
 static const char *k_section = "driver_mouselaser";
-static const char *k_version = "0.5.1-experimental";
+static const char *k_version = "0.6.1-experimental";
 
 static void Log(const char *fmt, ...)
 {
@@ -79,6 +81,11 @@ struct Settings
     int wheelReleaseMs = 60;
     float wheelDeflection = 1.0f;     // maximum deflection (both modes)
     int wheelMaxQueued = 10; // notches buffered while flicks are still playing out
+    // Laser mode handshake. The grip click is SteamVR's Laser Mouse <-> Gamepad TOGGLE, so it
+    // is pulsed once on activation and once more on deactivation, which puts the mode back.
+    int claimDelayMs = 50;        // wait after the role change before pulsing (bindings settle)
+    int pulseMs = 60;             // length of each grip / bumper pulse
+    float reconnectGraceS = 60.f; // keep laser mode this long while the mouse is gone (sleep)
 
     void Load()
     {
@@ -119,6 +126,12 @@ struct Settings
         if (err == VRSettingsError_None) wheelSmoothHoldMs = i;
         i = s->GetInt32(k_section, "wheelSmoothDecayMs", &err);
         if (err == VRSettingsError_None) wheelSmoothDecayMs = i;
+        i = s->GetInt32(k_section, "claimDelayMs", &err);
+        if (err == VRSettingsError_None) claimDelayMs = i;
+        i = s->GetInt32(k_section, "pulseMs", &err);
+        if (err == VRSettingsError_None) pulseMs = i;
+        f = s->GetFloat(k_section, "reconnectGraceS", &err);
+        if (err == VRSettingsError_None) reconnectGraceS = f;
     }
 };
 
@@ -199,15 +212,28 @@ private:
     std::chrono::steady_clock::time_point m_last, m_lastNotch;
 };
 
+// A button that also remembers a press, so a click that starts and ends between two
+// RunFrames is still reported down for one frame.
+struct LatchedButton
+{
+    std::atomic<bool> down{false}, pressed{false};
+    void Set(bool v)
+    {
+        down = v;
+        if (v) pressed = true;
+    }
+    bool Read() { return pressed.exchange(false) || down; }
+    void Reset() { down = pressed = false; }
+};
+
 // Reads the physical mouse on its own thread. All state shared with RunFrame is atomic.
 class MouseReader
 {
 public:
     std::atomic<bool> active{false};
-    std::atomic<bool> toggled{false}; // set on every toggle; RunFrame clears it
     std::atomic<int> dx{0}, dy{0};
     std::atomic<int> wheel{0}, hwheel{0};
-    std::atomic<bool> left{false}, right{false}, middle{false}, back{false};
+    LatchedButton left, right, middle, back;
 
     // Destroying a joinable std::thread calls std::terminate (taking vrserver down),
     // so make sure the thread is stopped even if Deactivate() was never called.
@@ -226,6 +252,7 @@ public:
         if (m_thread.joinable())
             m_thread.join();
         Close();
+        active = false;
     }
 
 private:
@@ -233,6 +260,8 @@ private:
     std::atomic<bool> m_run{false};
     std::thread m_thread;
     int m_fd = -1;
+    bool m_lost = false; // mouse vanished while active; laser mode kept for reconnectGraceS
+    std::chrono::steady_clock::time_point m_lostAt;
 
     bool IsMouse(int fd, std::string &name)
     {
@@ -242,6 +271,11 @@ private:
         char n[256] = {};
         if (ioctl(fd, EVIOCGNAME(sizeof(n)), n) < 0) return false;
         name = n;
+        // Skip Valve's own emulated mice (e.g. "Steam Ctrl (BT) ... Mouse") unless asked for.
+        input_id id = {};
+        ioctl(fd, EVIOCGID, &id);
+        if (m_settings.nameFilter.empty() && (id.vendor == 0x28de || name.find("Steam") != std::string::npos))
+            return false;
         if (ioctl(fd, EVIOCGBIT(0, sizeof(evbits)), evbits) < 0) return false;
         if (!TestBit(evbits, EV_REL) || !TestBit(evbits, EV_KEY)) return false;
         ioctl(fd, EVIOCGBIT(EV_REL, sizeof(relbits)), relbits);
@@ -266,6 +300,14 @@ private:
             {
                 m_fd = fd;
                 Log("using %s (%s)\n", path.c_str(), name.c_str());
+                if (active && ioctl(m_fd, EVIOCGRAB, 1) < 0)
+                {
+                    Log("EVIOCGRAB failed after reconnect (%s)\n", strerror(errno));
+                    SetActive(false);
+                }
+                else if (m_lost)
+                    Log("mouse back, laser mode kept\n");
+                m_lost = false;
                 closedir(dir);
                 return true;
             }
@@ -283,7 +325,19 @@ private:
             close(m_fd);
             m_fd = -1;
         }
-        SetActive(false);
+        left.Reset(), right.Reset(), middle.Reset(), back.Reset();
+        dx = dy = wheel = hwheel = 0;
+    }
+
+    // The mouse vanished (unplugged, or a Bluetooth mouse napping). Keep laser mode for a
+    // while, so a short nap doesn't throw the user out of it.
+    void Lost()
+    {
+        Close();
+        if (!active) return;
+        m_lost = true;
+        m_lostAt = std::chrono::steady_clock::now();
+        Log("mouse gone, keeping laser mode for %.0f s\n", m_settings.reconnectGraceS);
     }
 
     void SetActive(bool on)
@@ -294,10 +348,10 @@ private:
             Log("EVIOCGRAB failed (%s), staying inactive\n", strerror(errno));
             return;
         }
-        left = right = middle = back = false;
+        left.Reset(), right.Reset(), middle.Reset(), back.Reset();
         dx = dy = wheel = hwheel = 0;
         active = on;
-        toggled = true;
+        m_lost = false;
         Log("%s\n", on ? "ACTIVE (mouse drives the laser)" : "inactive (mouse back to desktop)");
     }
 
@@ -305,6 +359,12 @@ private:
     {
         while (m_run)
         {
+            if (m_fd < 0 && m_lost &&
+                std::chrono::steady_clock::now() - m_lostAt > std::chrono::duration<float>(m_settings.reconnectGraceS))
+            {
+                Log("mouse still gone, leaving laser mode\n");
+                SetActive(false);
+            }
             if (m_fd < 0 && !Open())
             {
                 for (int i = 0; i < 20 && m_run; i++) usleep(100 * 1000);
@@ -316,7 +376,7 @@ private:
             if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL))
             {
                 Log("mouse disappeared\n");
-                Close();
+                Lost();
                 continue;
             }
             input_event ev;
@@ -326,7 +386,7 @@ private:
             if (n < 0 && errno == ENODEV)
             {
                 Log("mouse disappeared\n");
-                Close();
+                Lost();
             }
         }
     }
@@ -335,7 +395,9 @@ private:
     {
         if (ev.type == EV_KEY && ev.code == m_settings.toggleButton)
         {
-            if (ev.value == 1) SetActive(!active);
+            // Toggle on release: gamescope then sees a whole click (switching on) or nothing
+            // (switching off, the press is already grabbed), never half of one.
+            if (ev.value == 0) SetActive(!active);
             return;
         }
         if (!active) return;
@@ -348,10 +410,11 @@ private:
         }
         else if (ev.type == EV_KEY)
         {
-            if (ev.code == BTN_LEFT) left = ev.value != 0;
-            else if (ev.code == BTN_RIGHT) right = ev.value != 0;
-            else if (ev.code == BTN_MIDDLE) middle = ev.value != 0;
-            else if (ev.code == m_settings.backButton) back = ev.value != 0;
+            if (ev.value == 2) return; // autorepeat
+            if (ev.code == BTN_LEFT) left.Set(ev.value != 0);
+            else if (ev.code == BTN_RIGHT) right.Set(ev.value != 0);
+            else if (ev.code == BTN_MIDDLE) middle.Set(ev.value != 0);
+            else if (ev.code == m_settings.backButton) back.Set(ev.value != 0);
         }
     }
 };
@@ -382,6 +445,7 @@ public:
         VRDriverInput()->CreateBooleanComponent(c, "/input/b/click", &m_b);
         VRDriverInput()->CreateBooleanComponent(c, "/input/back/click", &m_back);
         VRDriverInput()->CreateBooleanComponent(c, "/input/grip/click", &m_grip);
+        VRDriverInput()->CreateBooleanComponent(c, "/input/bumper/click", &m_bumper);
         VRDriverInput()->CreateBooleanComponent(c, "/input/thumbstick/touch", &m_stickTouch);
         VRDriverInput()->CreateScalarComponent(c, "/input/thumbstick/x", &m_stickX,
                                                VRScalarType_Absolute, VRScalarUnits_NormalizedTwoSided);
@@ -413,7 +477,7 @@ public:
     }
 
     uint32_t Id() const { return m_id; }
-    bool Active() const { return m_mouse.active; }
+    bool Active() const { return m_phase != Phase::Off; }
 
     void RunFrame()
     {
@@ -423,30 +487,60 @@ public:
         VRServerDriverHost()->GetRawTrackedDevicePoses(0, &hmd, 1);
         const HmdMatrix34_t &m = hmd.mDeviceToAbsoluteTracking;
 
-        bool active = m_mouse.active;
-        // A hand role would steal the real controller's slot while connected, so it only
-        // connects while active. Other roles stay connected: a device that disappears or goes
-        // invalid is dropped as the laser pointer until a new "user interaction" (about 10 s of
-        // quiet), so a quick off/on would grab the mouse with no laser.
-        bool present = active || IsRoleAllowedAsHand(ETrackedControllerRole(m_settings.role));
-        if (active != m_wasActive)
+        using clock = std::chrono::steady_clock;
+        const clock::time_point now = clock::now();
+        const auto elapsed = now - m_phaseAt;
+        const auto pulse = std::chrono::milliseconds(m_settings.pulseMs);
+        const bool want = m_mouse.active;
+
+        // ON:  hand role -> wait claimDelayMs -> grip pulse (gamepad -> laser) -> bumper pulse
+        //      (SwitchLaserHand only: moves the laser to us) -> On.
+        // OFF: grip pulse while still a hand (laser -> gamepad, the stock default) -> let the
+        //      release land -> back to the parked role.
+        switch (m_phase)
         {
-            m_wasActive = active;
-            int role = active && m_settings.activeRole > 0 ? m_settings.activeRole : m_settings.role;
-            if (role != m_currentRole)
+        case Phase::Off:
+            if (want)
             {
-                m_currentRole = role;
-                VRProperties()->SetInt32Property(m_container, Prop_ControllerRoleHint_Int32, role);
-                Log("role %d\n", role);
+                SetRole(m_settings.activeRole > 0 ? m_settings.activeRole : m_settings.role);
+                if (hmd.bPoseIsValid)
+                {
+                    // Start the ray where the user is looking.
+                    float fx = -m.m[0][2], fy = -m.m[1][2], fz = -m.m[2][2];
+                    m_yaw = atan2f(-fx, -fz);
+                    m_pitch = asinf(fmaxf(-1.f, fminf(1.f, fy)));
+                }
+                Enter(Phase::Settle, now);
             }
+            break;
+        case Phase::Settle:
+            if (!want) SetRole(m_settings.role), Enter(Phase::Off, now); // nothing pulsed yet
+            else if (elapsed >= std::chrono::milliseconds(m_settings.claimDelayMs)) Enter(Phase::Grip, now);
+            break;
+        case Phase::Grip:
+            if (elapsed >= pulse) Enter(Phase::Claim, now);
+            break;
+        case Phase::Claim:
+            if (elapsed >= pulse) Enter(Phase::On, now);
+            break;
+        case Phase::On:
+            if (!want) Enter(Phase::Restore, now);
+            break;
+        case Phase::Restore:
+            if (elapsed >= pulse) Enter(Phase::Release, now);
+            break;
+        case Phase::Release:
+            if (elapsed >= pulse) SetRole(m_settings.role), Enter(Phase::Off, now);
+            break;
         }
-        if (m_mouse.toggled.exchange(false) && active && hmd.bPoseIsValid)
-        {
-            // Start the ray where the user is looking.
-            float fx = -m.m[0][2], fy = -m.m[1][2], fz = -m.m[2][2];
-            m_yaw = atan2f(-fx, -fz);
-            m_pitch = asinf(fmaxf(-1.f, fminf(1.f, fy)));
-        }
+        const bool aiming = m_phase == Phase::Settle || m_phase == Phase::Grip ||
+                            m_phase == Phase::Claim || m_phase == Phase::On;
+        const bool live = m_phase == Phase::On && want;
+
+        // Connected whenever laser mode is (or is being switched) on. While parked, a stylus
+        // DISCONNECTS (IsRoleAllowedAsHand(Stylus) is false); a hand role stays connected.
+        // This is the behaviour that was tested; staying connected is plan item 1.5.
+        bool present = m_phase != Phase::Off || IsRoleAllowedAsHand(ETrackedControllerRole(m_settings.role));
 
         const float k = m_settings.sensitivityDeg * float(M_PI) / 180.f;
         m_yaw -= m_mouse.dx.exchange(0) * k;
@@ -464,7 +558,7 @@ public:
         pose.vecPosition[1] = m.m[1][3] + m_settings.originOffsetY;
         pose.vecPosition[2] = m.m[2][3];
         // q = yaw(Y) * pitch(X). While off the ray is parked straight up, where it hits nothing.
-        float yaw = active ? m_yaw : 0.f, pitch = active ? m_pitch : float(M_PI) / 2;
+        float yaw = aiming ? m_yaw : 0.f, pitch = aiming ? m_pitch : float(M_PI) / 2;
         float cy = cosf(yaw / 2), sy = sinf(yaw / 2);
         float cp = cosf(pitch / 2), sp = sinf(pitch / 2);
         pose.qRotation.w = cy * cp;
@@ -478,34 +572,55 @@ public:
         VRServerDriverHost()->TrackedDevicePoseUpdated(m_id, pose, sizeof(DriverPose_t));
 
         // Wheel notches become thumbstick flicks: vertical wheel -> Y, tilt wheel -> X.
-        if (!active) m_stepY.Reset(), m_stepX.Reset();
+        if (!live) m_stepY.Reset(), m_stepX.Reset();
         float stickY = m_stepY.Update(m_mouse.wheel.exchange(0), m_settings);
         float stickX = m_stepX.Update(m_mouse.hwheel.exchange(0), m_settings);
 
-        bool l = active && m_mouse.left;
+        // Read() every frame so stale latched presses are dropped while not live.
+        bool l = m_mouse.left.Read() && live;
         VRDriverInput()->UpdateBooleanComponent(m_trigger, l, 0);
         VRDriverInput()->UpdateScalarComponent(m_triggerValue, l ? 1.f : 0.f, 0);
-        VRDriverInput()->UpdateBooleanComponent(m_a, active && m_mouse.right, 0);
-        VRDriverInput()->UpdateBooleanComponent(m_b, active && m_mouse.middle, 0);
-        VRDriverInput()->UpdateBooleanComponent(m_back, active && m_mouse.back, 0);
-        VRDriverInput()->UpdateBooleanComponent(m_grip, active, 0); // holds "quick mouse" on
+        VRDriverInput()->UpdateBooleanComponent(m_a, m_mouse.right.Read() && live, 0);
+        VRDriverInput()->UpdateBooleanComponent(m_b, m_mouse.middle.Read() && live, 0);
+        VRDriverInput()->UpdateBooleanComponent(m_back, m_mouse.back.Read() && live, 0);
+        VRDriverInput()->UpdateBooleanComponent(m_grip, m_phase == Phase::Grip || m_phase == Phase::Restore, 0);
+        VRDriverInput()->UpdateBooleanComponent(m_bumper, m_phase == Phase::Claim, 0);
         VRDriverInput()->UpdateBooleanComponent(m_stickTouch, stickX != 0.f || stickY != 0.f, 0);
         VRDriverInput()->UpdateScalarComponent(m_stickX, stickX, 0);
         VRDriverInput()->UpdateScalarComponent(m_stickY, stickY, 0);
     }
 
 private:
+    enum class Phase { Off, Settle, Grip, Claim, On, Restore, Release };
+
+    void Enter(Phase p, std::chrono::steady_clock::time_point now)
+    {
+        static const char *names[] = {"off", "settle", "grip pulse", "claim pulse", "on", "restore pulse", "release"};
+        m_phase = p;
+        m_phaseAt = now;
+        Log("phase %s\n", names[int(p)]);
+    }
+
+    void SetRole(int role)
+    {
+        if (role == m_currentRole) return;
+        m_currentRole = role;
+        VRProperties()->SetInt32Property(m_container, Prop_ControllerRoleHint_Int32, role);
+        Log("role %d\n", role);
+    }
+
     Settings m_settings;
     MouseReader m_mouse;
+    Phase m_phase = Phase::Off;
+    std::chrono::steady_clock::time_point m_phaseAt;
     uint32_t m_id = k_unTrackedDeviceIndexInvalid;
     PropertyContainerHandle_t m_container = k_ulInvalidPropertyContainer;
-    bool m_wasActive = false;
     int m_currentRole = 0;
     std::mutex m_poseMutex;
     DriverPose_t m_pose = {};
     float m_yaw = 0, m_pitch = 0;
     StickStepper m_stepX, m_stepY;
-    VRInputComponentHandle_t m_trigger = 0, m_triggerValue = 0, m_a = 0, m_b = 0, m_back = 0, m_grip = 0;
+    VRInputComponentHandle_t m_trigger = 0, m_triggerValue = 0, m_a = 0, m_b = 0, m_back = 0, m_grip = 0, m_bumper = 0;
     VRInputComponentHandle_t m_stickTouch = 0, m_stickX = 0, m_stickY = 0;
 };
 
@@ -543,20 +658,15 @@ public:
     void RunFrame() override
     {
         if (m_device) m_device->RunFrame();
-        // Diagnostics: events about our device, and the global ones that decide which device
-        // the compositor treats as the laser. There is no direct "laser is up" signal.
+        // Diagnostics: log every event (the first 20 of each type, then every 100th), to find
+        // out whether a driver sees PrimaryDashboardDeviceChanged (525) or focus events.
         VREvent_t ev;
         while (VRServerDriverHost()->PollNextEvent(&ev, sizeof(ev)))
         {
-            bool ours = m_device && ev.trackedDeviceIndex == m_device->Id();
-            bool global = ev.eventType == VREvent_TrackedDeviceUserInteractionStarted ||
-                          ev.eventType == VREvent_TrackedDeviceUserInteractionEnded ||
-                          ev.eventType == VREvent_TrackedDeviceRoleChanged ||
-                          ev.eventType == VREvent_DashboardActivated ||
-                          ev.eventType == VREvent_DashboardDeactivated;
-            if (ours || global)
-                Log("event %u device %u (%s)\n", ev.eventType, ev.trackedDeviceIndex,
-                    m_device && m_device->Active() ? "active" : "off");
+            unsigned n = ++m_eventCounts[ev.eventType];
+            if (n <= 20 || n % 100 == 0)
+                Log("event %u device %u (%s) #%u\n", ev.eventType, ev.trackedDeviceIndex,
+                    m_device && m_device->Active() ? "active" : "off", n);
         }
     }
 
@@ -566,6 +676,7 @@ public:
 
 private:
     MouseLaserDevice *m_device = nullptr;
+    std::map<uint32_t, unsigned> m_eventCounts;
 };
 
 static MouseLaserProvider g_provider;

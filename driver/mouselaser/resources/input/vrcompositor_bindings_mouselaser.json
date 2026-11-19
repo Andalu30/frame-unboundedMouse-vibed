@@ -163,6 +163,33 @@
 							"output": "/actions/lasermouse_secondary/in/switchlaserhand"
 						}
 					}
+				},
+				{
+					"path": "/user/hand/left/input/bumper",
+					"mode": "button",
+					"inputs": {
+						"click": {
+							"output": "/actions/lasermouse_secondary/in/switchlaserhand"
+						}
+					}
+				},
+				{
+					"path": "/user/hand/right/input/bumper",
+					"mode": "button",
+					"inputs": {
+						"click": {
+							"output": "/actions/lasermouse_secondary/in/switchlaserhand"
+						}
+					}
+				},
+				{
+					"path": "/user/stylus/input/bumper",
+					"mode": "button",
+					"inputs": {
+						"click": {
+							"output": "/actions/lasermouse_secondary/in/switchlaserhand"
+						}
+					}
 				}
 			]
 		},
