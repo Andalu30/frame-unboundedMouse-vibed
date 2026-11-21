@@ -10,9 +10,10 @@ Run by ctest (see CMakeLists.txt), or directly: python3 tests/check_resources.py
 - every binding for the left hand is repeated for the right hand and the stylus;
 - the input profile, the components the code creates and the localization labels match;
 - names and file references between manifest, profile and bindings resolve;
-- the settings page (settingsschema.vrsettings) only shows real settings, offers values of the
-  right type including the default, and marks "requires_restart" exactly on the settings that
-  core.h's ApplyLive can't change while running (the README lists the same ones);
+- the settings page (settingsschema.vrsettings) sets show_without_hmd (or SteamVR hides it), only
+  shows real settings, offers values of the right type including the default, and marks
+  "requires_restart" exactly on the settings that core.h's ApplyLive can't change while running
+  (the README lists the same ones);
 - the version in CMakeLists.txt is the one the README and the development log mention.
 """
 
@@ -124,6 +125,10 @@ restart_keys = set(re.findall(r'(?:push|emplace)_back\("(\w+)"\)', apply_live.gr
 schema = data["resources/settings/settingsschema.vrsettings"]
 PREFIX = "/settings/driver_mouselaser/"
 for section in schema:
+    # vrserver tags a driver's section with "driver": <name>, and the dashboard hides such a section
+    # unless that driver runs the headset, or the section sets show_without_hmd (see how-it-works.md).
+    check(section.get("show_without_hmd") is True,
+          f"settings page: section {section.get('title')!r} sets show_without_hmd, or SteamVR hides it")
     for entry in section["values"]:
         name = entry.get("name", "")
         key = name[len(PREFIX):]

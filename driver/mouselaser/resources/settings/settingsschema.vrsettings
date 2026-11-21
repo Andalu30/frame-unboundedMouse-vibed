@@ -2,6 +2,7 @@
 	{
 		"title" : "Mouse Laser",
 		"controller" : "mouselaser_settings",
+		"show_without_hmd" : true,
 		"values" : [
 			{
 				"name" : "/settings/driver_mouselaser/sensitivity",
