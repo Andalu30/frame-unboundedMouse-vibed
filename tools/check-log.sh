@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # Summarises the driver's latest session from SteamVR's log: which build loaded, which mouse it
 # uses, how the laser mode switches went, and known error lines. Run it on the headset after a
-# reboot and a few on/off switches. Read-only. Exits 1 if something is clearly wrong.
+# SteamVR restart and a few on/off switches. Read-only. Exits 1 if something is clearly wrong.
 #
 #   tools/check-log.sh [path/to/vrserver.txt]
 set -eu

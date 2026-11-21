@@ -65,7 +65,7 @@ curl -fsSL https://raw.githubusercontent.com/Andalu30/frame-unboundedMouse-vibed
 ```sh
 cmake -S . -B build -G Ninja && cmake --build build
 ./install.sh      # registers driver/mouselaser with vrpathreg (backs up openvrpaths.vrpath first)
-# then REBOOT the headset
+# then restart SteamVR
 ```
 
 `install.sh` refuses to run if another driver named `mouselaser` is already registered from a different folder.
@@ -81,13 +81,13 @@ Or run `tools/check-log.sh` for a summary (read-only).
 
 ## Uninstall
 ```sh
-./uninstall.sh    # then reboot
+./uninstall.sh    # then restart SteamVR
 ```
 
 ## Settings
 The common ones are in SteamVR's settings, in a **Mouse Laser** section: sensitivity, invert vertical aim, wheel mode, the laser mode and Back buttons, and the laser hand. The switch-on delay is there too, among the advanced settings. All of them, including the rest, can also be set in `~/.config/openvr/config/steamvr.vrsettings` under a `"driver_mouselaser"` section.
 
-The driver notices a change within a second and applies it right away. These need a SteamVR restart instead: `toggleButton`, `backButton`, `role`, `activeRole`, `deviceNameFilter`, `reconnectGraceS` and `enable`. On the Frame, restarting SteamVR also closes the desktop and everything in it, so you may prefer to reboot.
+The driver notices a change within a second and applies it right away. These need a SteamVR restart instead: `toggleButton`, `backButton`, `role`, `activeRole`, `deviceNameFilter`, `reconnectGraceS` and `enable`. On the Frame, restarting SteamVR also restarts gamescope, Steam and the desktop, closing everything open in it.
 
 A value out of its range is corrected and logged as `setting ...`. The log shows the values in use on a `settings: ...` line, and `settings changed ...` when they change.
 
@@ -122,9 +122,9 @@ A value out of its range is corrected and logged as `setting ...`. The log shows
 
 ## Recovery
 If SteamVR won't come up properly after installing, there are four options:
-0. In VR, open **Manage Add-ons**, switch *mouselaser* off, then reboot.
-1. **SSH or RDP in** (`xrdp` runs on the Frame), run `./uninstall.sh` or `vrpathreg removedriver <path>/driver/mouselaser`, and reboot.
-2. Set `"driver_mouselaser": { "enable": false }` in `steamvr.vrsettings`, then reboot.
+0. In VR, open **Manage Add-ons**, switch *mouselaser* off, then restart SteamVR.
+1. **SSH or RDP in** (`xrdp` runs on the Frame), run `./uninstall.sh` or `vrpathreg removedriver <path>/driver/mouselaser`, and restart SteamVR (or reboot).
+2. Set `"driver_mouselaser": { "enable": false }` in `steamvr.vrsettings`, then restart SteamVR (or reboot).
 3. Restore the backup: `cp ~/.config/openvr/openvrpaths.vrpath.bak-mouselaser ~/.config/openvr/openvrpaths.vrpath`.
 
 ## Tested on

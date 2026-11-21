@@ -55,7 +55,7 @@ In VS Code, the [SonarQube for IDE](https://docs.sonarsource.com/sonarqube-for-v
 
 ## On the headset
 
-The driver only loads when SteamVR starts, so rebuild and reboot first.
+The driver only loads when SteamVR starts, so rebuild and restart SteamVR first.
 
 1. Check the log:
    ```sh

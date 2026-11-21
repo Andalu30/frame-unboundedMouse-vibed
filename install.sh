@@ -41,4 +41,4 @@ fi
 [ -f "$VRPATHS" ] && cp "$VRPATHS" "$VRPATHS.bak-mouselaser"
 "$VRPATHREG" adddriver "$DIR"
 "$VRPATHREG" show | grep -A5 -i "external drivers" || true
-echo "Registered. Reboot to load it (on the Steam Frame, restarting SteamVR also restarts gamescope)."
+echo "Registered. Restart SteamVR to load it (on the Steam Frame, that also restarts gamescope and the desktop)."

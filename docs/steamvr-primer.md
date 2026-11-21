@@ -76,7 +76,7 @@ SDDM (autologin)
                  └─ kwin_wayland (nested) → Plasma → Konsole → this Claude session
 ```
 
-- `gamescope-session.service` is declared `PartOf=steamvr.service`. **If SteamVR restarts, systemd restarts gamescope too, and with it Steam and the whole nested desktop.** Any terminal running inside the desktop dies. That's why we always reboot instead of "just restarting SteamVR".
+- `gamescope-session.service` is declared `PartOf=steamvr.service`. **If SteamVR restarts, systemd restarts gamescope too, and with it Steam and the whole nested desktop.** Any terminal running inside the desktop dies. The upside: a SteamVR restart works like a warm restart of the whole VR session, so it's all you need to load a new build, settings or bindings. A full reboot isn't needed. Just don't trigger it from a terminal whose work you want to keep.
 - The nested desktop gets its own runtime directory: `XDG_RUNTIME_DIR=/run/user/1000/nested_plasma`. Commands that need the real user session, like `systemctl --user`, need `XDG_RUNTIME_DIR=/run/user/1000` in front of them.
 - The desktop's size (1280×800) is hardcoded in `/usr/bin/steamos-nested-desktop`. Gamescope then stretches its window to 1920×1080 anyway (see [section 9](#9-the-display-chain-how-the-kde-desktop-gets-into-the-headset)).
 
@@ -151,7 +151,7 @@ vrserver starts
 ```
 - **Two interfaces:** the *provider* (`IServerTrackedDeviceProvider`) is the driver as a whole; each *device* is an `ITrackedDeviceServerDriver`.
 - **Version strings** like `IServerTrackedDeviceProvider_004` are how SteamVR checks the driver was built against a compatible API. The Frame's SteamVR is API 2.1. We compile against the header SteamVR itself ships: `/opt/steamvr/tools/hellovr_vulkan_linux/src/openvr/headers/openvr_driver.h`.
-- **Everything is read once at startup.** Settings, bindings and the `.so` itself. A code or binding change needs a **rebuild and a reboot** on the Frame (see section 3).
+- **Everything is read once at startup.** Settings, bindings and the `.so` itself. A code or binding change needs a **rebuild and a SteamVR restart** on the Frame (see section 3).
 - `RunFrame` runs on vrserver's main thread. Blocking there stalls SteamVR, so we read the mouse on our own thread and hand values over through atomics.
 
 ### Settings
@@ -362,8 +362,8 @@ With all of the above, the driver is short. Details are in [how-it-works.md](how
 
 | Lesson | Why |
 |---|---|
-| **Never restart SteamVR from inside the desktop.** Reboot instead. | gamescope is `PartOf=steamvr.service`; the desktop and your terminal die with it. |
-| **Rebuild *and* reboot to test anything.** | The `.so`, settings and bindings are only read at startup. |
+| **Restarting SteamVR closes the desktop.** Save your work first, and don't restart it from a session you need to keep. | gamescope is `PartOf=steamvr.service`; the desktop and your terminal die with it. |
+| **Rebuild *and* restart SteamVR to test anything.** A reboot isn't needed. | The `.so`, settings and bindings are only read at startup. |
 | **Bump the version string on every change.** | It's the only quick way to know which build is running. We once lost track: git was reverted but the old `.so` was still in place, and the log showed `0.4.3` while the source said `0.4.0`. The `.so` is gitignored, so reverting git doesn't touch it. |
 | **A crash in the driver takes SteamVR down.** | The driver runs inside `vrserver`. Keep SSH/RDP ready, know the [recovery steps](../README.md#recovery), and never let a joinable `std::thread` be destroyed (that calls `std::terminate`). |
 | **Don't disconnect or invalidate the pointer device to "turn it off".** | The compositor drops it as the laser pointer, and only takes it back after a new user interaction (about 10 s of quiet). Unless you claim it back explicitly: since 0.6.0 the driver does, with the grip and bumper pulses, so its stylus can disconnect while off. |

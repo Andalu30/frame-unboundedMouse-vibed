@@ -14,7 +14,7 @@ DSI-1 panel (2× 2160x2160 @ 108/120/144 Hz)
                  └─ Plasma + apps
 ```
 - Steam's "Desktop" entry is `/usr/share/applications/deckard-nested-desktop.desktop`. "Deckard" is the Frame's internal codename.
-- Gamescope's arguments are hardcoded in `/usr/lib/steamos/gamescope-session` and run from the user unit `gamescope-session.service`. That unit is `PartOf=steamvr.service`, which is why restarting SteamVR kills the desktop.
+- Gamescope's arguments are hardcoded in `/usr/lib/steamos/gamescope-session` and run from the user unit `gamescope-session.service`. That unit is `PartOf=steamvr.service`, which is why restarting SteamVR kills the desktop. It also means a SteamVR restart restarts the whole VR side (gamescope, Steam, the desktop), much like a warm restart.
 - Gamescope resizes KWin's window to its own 1920×1080 output, whatever size KWin asks for.
 
 ## The input path
