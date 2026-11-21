@@ -1,6 +1,6 @@
 # Steam Frame background: why the mouse is trapped, and why a driver fixes it
 
-These are findings from read-only exploration of a Steam Frame on 2026-10-01 (SteamOS 0.4.2 VR, build 20260928.6175029). Paths and versions may change with updates.
+These are findings from read-only exploration of a Steam Frame (SteamOS 0.4.2 VR, build 20260928.6175029). Paths and versions may change with updates.
 
 ## The display chain
 The KDE desktop doesn't run on the hardware. It is nested several layers deep:

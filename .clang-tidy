@@ -1,0 +1,59 @@
+# Static analysis. CI runs this with clang-tidy 22 and fails on any finding (WarningsAsErrors).
+# Locally: clang-tidy -p build src/driver.cpp tools/wheel_sim.cpp tests/unit_tests.cpp  (see docs/testing.md)
+#
+# Every check family is on. The ones turned off below are style rules that don't fit a small
+# driver built on C APIs (evdev, OpenVR); each says why. tests/.clang-tidy relaxes a few more.
+Checks:
+  - -*
+  - bugprone-*
+  - cert-*
+  - clang-analyzer-*
+  - concurrency-*
+  - cppcoreguidelines-*
+  - misc-*
+  - modernize-*
+  - performance-*
+  - portability-*
+  - readability-*
+  # C APIs: the kernel and OpenVR take C arrays, define flags as signed ints, and zero structs with `= {}`.
+  - -bugprone-invalid-enum-default-initialization
+  - -bugprone-signed-bitwise
+  - -cppcoreguidelines-avoid-c-arrays
+  - -modernize-avoid-c-arrays
+  - -cppcoreguidelines-pro-bounds-array-to-pointer-decay
+  - -cppcoreguidelines-pro-bounds-pointer-arithmetic
+  - -cppcoreguidelines-pro-bounds-constant-array-index
+  - -cppcoreguidelines-pro-bounds-avoid-unchecked-container-access
+  - -readability-implicit-bool-conversion
+  # OpenVR's interfaces have no virtual destructor; nothing is deleted through them.
+  - -cppcoreguidelines-virtual-class-destructor
+  # Log() is printf-style on purpose; its format attribute lets the compiler check every call.
+  - -cert-dcl50-cpp
+  - -modernize-avoid-variadic-functions
+  - -cppcoreguidelines-pro-type-vararg
+  # One translation unit, built with -fvisibility=hidden: linkage of internal names doesn't matter.
+  - -misc-use-anonymous-namespace
+  - -misc-use-internal-linkage
+  # Plain data structs (Settings, MouseState) are meant to have public fields.
+  - -misc-non-private-member-variables-in-classes
+  # Tuning values are named fields of Settings already; the rest are units and bit sizes.
+  - -cppcoreguidelines-avoid-magic-numbers
+  - -readability-magic-numbers
+  # Noise for code this size, or taste: left to review and .clang-format.
+  - -bugprone-easily-swappable-parameters
+  - -misc-const-correctness
+  - -misc-include-cleaner
+  - -modernize-use-nodiscard
+  - -modernize-use-trailing-return-type
+  - -performance-enum-size
+  - -portability-avoid-pragma-once
+  - -readability-braces-around-statements
+  - -readability-identifier-length
+  - -readability-isolate-declaration
+  - -readability-math-missing-parentheses
+  - -readability-trailing-comma
+  - -readability-uppercase-literal-suffix
+WarningsAsErrors: '*'
+HeaderFilterRegex: '.*/src/.*'
+CheckOptions:
+  cppcoreguidelines-special-member-functions.AllowMissingMoveFunctionsWhenCopyIsDeleted: true

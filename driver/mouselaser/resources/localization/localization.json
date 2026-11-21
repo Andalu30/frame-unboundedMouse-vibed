@@ -5,7 +5,9 @@
     "/input/trigger": "Left Click",
     "/input/a": "Right Click",
     "/input/b": "Middle Click",
-    "/input/grip": "Laser Mode (held while active)",
+    "/input/back": "Back (side button)",
+    "/input/grip": "Laser/Gamepad mode switch (automatic)",
+    "/input/bumper": "Take the laser (automatic)",
     "/input/thumbstick": "Mouse Wheel"
   },
   {
@@ -14,7 +16,9 @@
     "/input/trigger": "Clic izquierdo",
     "/input/a": "Clic derecho",
     "/input/b": "Clic central",
-    "/input/grip": "Modo láser (activo mientras está encendido)",
+    "/input/back": "Atrás (botón lateral)",
+    "/input/grip": "Cambio de modo láser/mando (automático)",
+    "/input/bumper": "Tomar el láser (automático)",
     "/input/thumbstick": "Rueda del ratón"
   }
 ]
