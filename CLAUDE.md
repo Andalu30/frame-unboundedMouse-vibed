@@ -12,10 +12,10 @@ Context for AI coding sessions on this repo. Read it before changing anything.
 - [docs/steam-frame-background.md](docs/steam-frame-background.md): the Frame's display and input stack, and why this approach was chosen.
 
 ## Environment facts that bite
-- The session usually runs **on the headset itself**, in a terminal inside the nested KDE desktop. That desktop sits inside gamescope, which is `PartOf=steamvr.service`. **Restarting SteamVR (or gamescope) kills the desktop and this session.** Ask the owner to reboot instead, and continue in a new session.
+- The session usually runs **on the headset itself**, in a terminal inside the nested KDE desktop. That desktop sits inside gamescope, which is `PartOf=steamvr.service`. **Restarting SteamVR (or gamescope) kills the desktop and this session.** So never restart it yourself: ask the owner to restart SteamVR, and continue in a new session.
 - Inside the nested desktop `XDG_RUNTIME_DIR=/run/user/1000/nested_plasma`. For `systemctl --user`, prefix the command with `XDG_RUNTIME_DIR=/run/user/1000`.
 - `/usr` belongs to the read-only OS image. Don't modify it. Everything here is user-level: `vrpathreg` and `~/.config/openvr`.
-- The driver `.so` and bindings are only loaded when SteamVR starts. Code changes need a rebuild **and** a reboot to test.
+- The driver `.so` and bindings are only loaded when SteamVR starts. Code changes need a rebuild **and** a SteamVR restart to test. On the Frame that restarts gamescope, Steam and the desktop too, so it works like a warm restart; a full reboot isn't needed.
 - Check the logs with `grep -a 'mouselaser:' ~/.local/share/Steam/logs/vrserver.txt | tail`.
 
 ## Ground rules from the owner
@@ -39,6 +39,6 @@ cmake -S . -B build -DMOUSELASER_TESTS=ON && cmake --build build --target unit_t
 ```
 Static analysis must stay clean: build with `-DMOUSELASER_WERROR=ON`, and run clang-tidy and clang-format 22.1.8 (commands in docs/testing.md). CI (`.github/workflows/ci.yml`) runs all of it on arm64. Don't silence a finding without a `// NOLINT(check): reason`.
 
-After a reboot on the headset, `tools/check-log.sh` summarises the driver's log.
+After a SteamVR restart on the headset, `tools/check-log.sh` summarises the driver's log.
 
 Bump `VERSION` in `project()` in `CMakeLists.txt` on every behaviour change, so the log (`mouselaser: version ...`) shows which build is running. The `resources` test checks that the README and the development log mention the same version.

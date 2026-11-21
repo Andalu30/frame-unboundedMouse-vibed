@@ -97,6 +97,6 @@ Steam UI lists are navigated through the compositor's `/actions/dualanalog` stic
 | `resources/localization/localization.json` | Display names (en_US, es_ES) for the controller type and its inputs, as shown in SteamVR's binding screens: "Left Click", "Mouse Wheel" and so on. |
 
 ## Changing things safely
-- After editing code: run the tests (see [testing.md](testing.md)), `cmake --build build`, then reboot. The `.so` is only loaded when SteamVR starts. After the reboot, `tools/check-log.sh` summarises how the driver did.
-- After editing bindings or the profile: reboot. SteamVR may also cache bindings per controller type under `~/.local/share/Steam/config/` or `~/.config/openvr/`.
+- After editing code: run the tests (see [testing.md](testing.md)), `cmake --build build`, then restart SteamVR. The `.so` is only loaded when SteamVR starts. After the restart, `tools/check-log.sh` summarises how the driver did.
+- After editing bindings or the profile: restart SteamVR. SteamVR may also cache bindings per controller type under `~/.local/share/Steam/config/` or `~/.config/openvr/`.
 - To add a setting: add it to `Settings` in `core.h` and `LoadSettings` in `driver.cpp`, add the default to `default.vrsettings`, and document it in the README table. The `resources` test checks that these agree.
