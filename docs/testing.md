@@ -62,7 +62,7 @@ The driver only loads when SteamVR starts, so rebuild and reboot first.
    ```
    It reads `~/.local/share/Steam/logs/vrserver.txt` (or a path you pass), looks only at the latest driver load, and reports:
    - the build that loaded, the device and the mouse;
-   - how many switch-ons reached the laser;
+   - how many switch-ons completed the on sequence (`phase on`). The driver can't see whether the laser actually appeared; that's the first manual check below;
    - whether grip pulses are balanced;
    - grab failures and mouse dropouts.
 

@@ -42,7 +42,7 @@ on=$(count '^phase on')
 grips=$(count '^phase grip pulse')
 restores=$(count '^phase restore pulse')
 last=$(printf '%s\n' "$lines" | sed -n 's/^phase //p' | tail -n 1)
-report info "switched on $started time(s): $on reached 'on', $cancelled cancelled before the grip pulse"
+report info "switched on $started time(s): $on completed the on sequence, $cancelled cancelled before the grip pulse"
 case "$last" in
 off | "")
     if [ "$grips" -eq "$restores" ]; then report ok "grip pulses balanced ($grips on, $restores off)"

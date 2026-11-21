@@ -45,8 +45,9 @@ struct Settings
     float sensitivityDeg = 0.05f; // degrees of ray rotation per mouse count
     int toggleButton = BTN_EXTRA;
     int backButton = BTN_SIDE; // sends the compositor's laser "back"; -1 = none
-    // Stylus (5) gets its own /user/stylus path. A hand role (1/2) shares the slot with the
-    // real controller of that hand, so the device disconnects while off (pre-0.5.0 behaviour).
+    // Stylus (5) gets its own /user/stylus path and reports itself disconnected while off. A hand
+    // role (1/2) shares the slot with the real controller of that hand and stays connected while
+    // off, so that controller loses its laser all the time.
     int role = k_roleStylus;
     // Role while laser mode is on (0 = keep `role`). The compositor attaches dragged overlays
     // to /user/hand/{left,right} or /user/head only, so a stylus drag follows the head.
