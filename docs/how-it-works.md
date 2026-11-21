@@ -49,7 +49,11 @@ SteamVR gives each controller a `/user/...` path based on its role. Hand roles s
 The provider empties SteamVR's event queue every frame and ignores the events. From 0.5.0 to 0.6.2 it logged them, looking for a driver-side signal for "the laser is up". There isn't one: event 525 (dashboard device changed) never reaches drivers. That's why switching on claims the laser explicitly with the grip and bumper pulses.
 
 ### Settings
-Read once at startup (`LoadSettings`). `Validate` in core.h then brings every value into a working range: numbers are clamped, and a role or button that can't work goes back to its default (a Back button that clashes with the toggle or a click button is turned off). Each correction is logged as `setting ...`, and the values in use as one `settings: ...` line.
+Read at startup (`LoadSettings`). `Validate` in core.h then brings every value into a working range: numbers are clamped, and a role or button that can't work goes back to its default (a Back button that clashes with the toggle or a click button is turned off). Each correction is logged as `setting ...`, and the values in use as one `settings: ...` line.
+
+**Settings page.** `resources/settings/settingsschema.vrsettings` adds a "Mouse Laser" section to SteamVR's settings. SteamVR draws it from that JSON (toggles and segmented choices, like Babble's "Expression Tracking" section) and writes the choices into `steamvr.vrsettings`; the driver has no UI code. It shows the common settings only.
+
+**Changes while running.** The provider re-reads the settings when SteamVR sends `VREvent_AnyDriverSettingsChanged`, and every second in case that event doesn't reach drivers. It logs only when something changed: `settings changed (settings event)` or `(1 s check)`, which also shows whether the event arrives. `ApplyLive` in core.h applies the settings used only on vrserver's thread (sensitivity, aim, wheel, switch-on timing). The others are read by the mouse thread or change the device's role, so they wait for a SteamVR restart and are logged as such; the settings page marks them `requires_restart`.
 
 ### RunFrame (inputs)
 | component | driven by | bound to (compositor) |

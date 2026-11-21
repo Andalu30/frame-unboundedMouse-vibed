@@ -2,7 +2,7 @@
 cmake_minimum_required(VERSION 3.20)
 # The driver's version. It is logged at startup ("mouselaser: version ..."), so bump it on every
 # behaviour change to tell builds apart on the headset.
-project(mouselaser VERSION 0.6.3 LANGUAGES CXX)
+project(mouselaser VERSION 0.7.0 LANGUAGES CXX)
 set(MOUSELASER_VERSION "${PROJECT_VERSION}-experimental")
 
 set(CMAKE_CXX_STANDARD 17)

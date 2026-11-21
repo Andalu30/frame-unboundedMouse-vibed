@@ -112,6 +112,7 @@ driver/mouselaser/
 ├── bin/linuxarm64/driver_mouselaser.so  ← the code; folder name = platform
 └── resources/
     ├── settings/default.vrsettings    ← default values of our settings section
+    ├── settings/settingsschema.vrsettings ← our section in SteamVR's settings page
     ├── input/                         ← input profile + default bindings (section 7)
     ├── localization/                  ← names shown in SteamVR's binding UI
     └── rendermodels/                  ← 3D model drawn for the device

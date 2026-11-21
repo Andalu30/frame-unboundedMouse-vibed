@@ -39,6 +39,7 @@
 #include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include <dirent.h>
 #include <fcntl.h>
@@ -84,82 +85,102 @@ static std::string ErrorText(int err)
     return strerror_r(err, buf, sizeof(buf));
 }
 
-// ReadSetting(key, out) overwrites `out` with the driver_mouselaser value of `key`, if SteamVR has
-// one: set by the user, or else taken from driver/mouselaser/resources/settings/default.vrsettings.
-// Otherwise `out` keeps its default from core.h's Settings. One overload per value type.
-// Every key is in default.vrsettings, so an error means the user's value couldn't be read
-// (a wrong type, for example): say so, rather than silently using the default.
-static bool SettingRead(const char *key, EVRSettingsError err)
+// Reads the driver_mouselaser section of steamvr.vrsettings. ReadSetting(key, out) overwrites `out`
+// with the value of `key`, if SteamVR has one: set by the user (in the file or on SteamVR's settings
+// page), or else taken from driver/mouselaser/resources/settings/default.vrsettings. Otherwise
+// `out` keeps its default from core.h's Settings. One overload per value type.
+// Every key is in default.vrsettings, so an error means the user's value couldn't be read (a wrong
+// type, for example). That goes into `problems` rather than straight into the log: the settings
+// are read again every second, and a problem should be logged when it appears, not every second.
+class SettingsReader
 {
-    if (err == VRSettingsError_None)
-        return true;
-    Log("setting %s can't be read (%s), using the default\n", key, VRSettings()->GetSettingsErrorNameFromEnum(err));
-    return false;
-}
+public:
+    std::vector<std::string> problems;
 
-static void ReadSetting(const char *key, float &out)
-{
-    EVRSettingsError err = VRSettingsError_None;
-    const float value = VRSettings()->GetFloat(k_section, key, &err);
-    if (SettingRead(key, err))
-        out = value;
-}
+    void ReadSetting(const char *key, float &out)
+    {
+        EVRSettingsError err = VRSettingsError_None;
+        const float value = VRSettings()->GetFloat(k_section, key, &err);
+        if (Ok(key, err))
+            out = value;
+    }
 
-static void ReadSetting(const char *key, int &out)
-{
-    EVRSettingsError err = VRSettingsError_None;
-    const int32_t value = VRSettings()->GetInt32(k_section, key, &err);
-    if (SettingRead(key, err))
-        out = value;
-}
+    void ReadSetting(const char *key, int &out)
+    {
+        EVRSettingsError err = VRSettingsError_None;
+        const int32_t value = VRSettings()->GetInt32(k_section, key, &err);
+        if (Ok(key, err))
+            out = value;
+    }
 
-static void ReadSetting(const char *key, bool &out)
-{
-    EVRSettingsError err = VRSettingsError_None;
-    const bool value = VRSettings()->GetBool(k_section, key, &err);
-    if (SettingRead(key, err))
-        out = value;
-}
+    void ReadSetting(const char *key, bool &out)
+    {
+        EVRSettingsError err = VRSettingsError_None;
+        const bool value = VRSettings()->GetBool(k_section, key, &err);
+        if (Ok(key, err))
+            out = value;
+    }
 
-static void ReadSetting(const char *key, std::string &out)
-{
-    EVRSettingsError err = VRSettingsError_None;
-    char value[256] = {};
-    VRSettings()->GetString(k_section, key, value, sizeof(value), &err);
-    if (SettingRead(key, err))
-        out = value;
-}
+    void ReadSetting(const char *key, std::string &out)
+    {
+        EVRSettingsError err = VRSettingsError_None;
+        char value[256] = {};
+        VRSettings()->GetString(k_section, key, value, sizeof(value), &err);
+        if (Ok(key, err))
+            out = value;
+    }
 
-static Settings LoadSettings()
+private:
+    bool Ok(const char *key, EVRSettingsError err)
+    {
+        if (err == VRSettingsError_None)
+            return true;
+        problems.push_back(std::string(key) + " can't be read (" + VRSettings()->GetSettingsErrorNameFromEnum(err) +
+                           "), using the default");
+        return false;
+    }
+};
+
+// Reads and validates every setting. `problems` gets one line per value that couldn't be read or
+// was corrected.
+static Settings LoadSettings(std::vector<std::string> &problems)
 {
+    SettingsReader r;
     Settings s;
-    ReadSetting("sensitivity", s.sensitivityDeg);
-    ReadSetting("toggleButton", s.toggleButton);
-    ReadSetting("backButton", s.backButton);
-    ReadSetting("role", s.role);
-    ReadSetting("activeRole", s.activeRole);
-    ReadSetting("deviceNameFilter", s.nameFilter);
-    ReadSetting("claimDelayMs", s.claimDelayMs);
-    ReadSetting("pulseMs", s.pulseMs);
-    ReadSetting("reconnectGraceS", s.reconnectGraceS);
-    ReadSetting("originOffsetY", s.originOffsetY);
-    ReadSetting("invertY", s.invertY);
+    r.ReadSetting("sensitivity", s.sensitivityDeg);
+    r.ReadSetting("toggleButton", s.toggleButton);
+    r.ReadSetting("backButton", s.backButton);
+    r.ReadSetting("role", s.role);
+    r.ReadSetting("activeRole", s.activeRole);
+    r.ReadSetting("deviceNameFilter", s.nameFilter);
+    r.ReadSetting("claimDelayMs", s.claimDelayMs);
+    r.ReadSetting("pulseMs", s.pulseMs);
+    r.ReadSetting("reconnectGraceS", s.reconnectGraceS);
+    r.ReadSetting("originOffsetY", s.originOffsetY);
+    r.ReadSetting("invertY", s.invertY);
     std::string wheelMode = "smooth";
-    ReadSetting("wheelMode", wheelMode);
+    r.ReadSetting("wheelMode", wheelMode);
     s.wheelSmooth = wheelMode != "step";
     if (wheelMode != "smooth" && wheelMode != "step")
-        Log("setting wheelMode \"%s\" is not \"smooth\" or \"step\", using smooth\n", wheelMode.c_str());
-    ReadSetting("wheelDeflection", s.wheelDeflection);
-    ReadSetting("wheelSmoothMin", s.wheelSmoothMin);
-    ReadSetting("wheelSmoothImpulse", s.wheelSmoothImpulse);
-    ReadSetting("wheelSmoothHoldMs", s.wheelSmoothHoldMs);
-    ReadSetting("wheelSmoothDecayMs", s.wheelSmoothDecayMs);
-    ReadSetting("wheelPressMs", s.wheelPressMs);
-    ReadSetting("wheelReleaseMs", s.wheelReleaseMs);
-    ReadSetting("wheelMaxQueued", s.wheelMaxQueued);
+        r.problems.push_back("wheelMode " + wheelMode + " is not smooth or step, using smooth");
+    r.ReadSetting("wheelDeflection", s.wheelDeflection);
+    r.ReadSetting("wheelSmoothMin", s.wheelSmoothMin);
+    r.ReadSetting("wheelSmoothImpulse", s.wheelSmoothImpulse);
+    r.ReadSetting("wheelSmoothHoldMs", s.wheelSmoothHoldMs);
+    r.ReadSetting("wheelSmoothDecayMs", s.wheelSmoothDecayMs);
+    r.ReadSetting("wheelPressMs", s.wheelPressMs);
+    r.ReadSetting("wheelReleaseMs", s.wheelReleaseMs);
+    r.ReadSetting("wheelMaxQueued", s.wheelMaxQueued);
+    problems = r.problems;
     for (const std::string &problem : Validate(s))
-        Log("setting %s\n", problem.c_str());
+        problems.push_back(problem);
     return s;
+}
+
+static void LogProblems(const std::vector<std::string> &problems)
+{
+    for (const std::string &problem : problems)
+        Log("setting %s\n", problem.c_str());
 }
 
 // Finds the mouse, grabs it while laser mode is on, and feeds its events into a MouseState.
@@ -454,6 +475,18 @@ public:
         return m_pose;
     }
 
+    // Settings changed while running: applies the ones that can change now (see ApplyLive in
+    // core.h) and returns the names of those that need a SteamVR restart.
+    std::vector<std::string> ApplySettings(const Settings &fresh)
+    {
+        std::vector<std::string> needRestart = ApplyLive(m_settings, fresh);
+        m_stepX.Reset(); // the wheel may have changed mode or timing in the middle of a scroll
+        m_stepY.Reset();
+        return needRestart;
+    }
+
+    const Settings &CurrentSettings() const { return m_settings; }
+
     void RunFrame()
     {
         if (m_id == k_unTrackedDeviceIndexInvalid)
@@ -566,15 +599,20 @@ public:
         // other accessors used throughout this file.
         VR_INIT_SERVER_DRIVER_CONTEXT(ctx);
         Log("version %s\n", k_version);
+        SettingsReader r;
         bool enable = true;
-        ReadSetting("enable", enable);
+        r.ReadSetting("enable", enable);
+        LogProblems(r.problems);
         if (!enable)
         {
             Log("disabled by setting\n");
             return VRInitError_None;
         }
-        const Settings s = LoadSettings();
+        std::vector<std::string> problems;
+        const Settings s = LoadSettings(problems);
+        LogProblems(problems);
         Log("settings: %s\n", Describe(s).c_str());
+        m_loadedSettings = Fingerprint(s, problems);
         // The provider owns the device; SteamVR only borrows the pointer until Cleanup().
         m_device = std::make_unique<MouseLaserDevice>(s);
         if (!VRServerDriverHost()->TrackedDeviceAdded("mouselaser-0", TrackedDeviceClass_Controller, m_device.get()))
@@ -594,11 +632,23 @@ public:
     {
         if (m_device)
             m_device->RunFrame();
-        // Empty SteamVR's event queue. The driver needs none of the events: logging them all
-        // (0.5.0 to 0.6.2) showed that none says who owns the laser.
+        // Empty SteamVR's event queue. Only one event matters: a driver's setting changed, for
+        // example on SteamVR's settings page. (Logging them all, 0.5.0 to 0.6.2, showed that none
+        // says who owns the laser.)
+        bool settingsEvent = false;
         VREvent_t ev{};
         while (VRServerDriverHost()->PollNextEvent(&ev, sizeof(ev)))
         {
+            if (ev.eventType == VREvent_AnyDriverSettingsChanged)
+                settingsEvent = true;
+        }
+        // The settings are also checked every second, in case that event doesn't reach drivers
+        // (not yet verified on the Frame). Reading them is a lookup inside vrserver: cheap.
+        const TimePoint now = Clock::now();
+        if (m_device && (settingsEvent || now >= m_nextSettingsCheck))
+        {
+            m_nextSettingsCheck = now + std::chrono::seconds(1);
+            ReloadSettings(settingsEvent ? "settings event" : "1 s check");
         }
     }
 
@@ -607,7 +657,41 @@ public:
     void LeaveStandby() override {}
 
 private:
+    // What was loaded, as text, to tell whether anything changed since: the settings plus any
+    // problems found reading them.
+    static std::string Fingerprint(const Settings &s, const std::vector<std::string> &problems)
+    {
+        std::string text = Describe(s);
+        for (const std::string &problem : problems)
+            text += "\n" + problem;
+        return text;
+    }
+
+    // Reads the settings again and, if anything changed, applies it and logs it. `trigger` says
+    // what noticed the change, for the log.
+    void ReloadSettings(const char *trigger)
+    {
+        std::vector<std::string> problems;
+        const Settings fresh = LoadSettings(problems);
+        std::string loaded = Fingerprint(fresh, problems);
+        if (loaded == m_loadedSettings)
+            return;
+        m_loadedSettings = std::move(loaded);
+        LogProblems(problems);
+        const std::vector<std::string> needRestart = m_device->ApplySettings(fresh);
+        Log("settings changed (%s): %s\n", trigger, Describe(m_device->CurrentSettings()).c_str());
+        if (!needRestart.empty())
+        {
+            std::string names;
+            for (const std::string &name : needRestart)
+                names += (names.empty() ? "" : ", ") + name;
+            Log("settings changed that apply after a SteamVR restart: %s\n", names.c_str());
+        }
+    }
+
     std::unique_ptr<MouseLaserDevice> m_device;
+    std::string m_loadedSettings;
+    TimePoint m_nextSettingsCheck = TimePoint::min(); // min(), unlike TimePoint{}, can't throw (g_provider is global)
 };
 
 // One provider for the lifetime of the loaded .so. It has to be a mutable global: vrserver gets a

@@ -50,6 +50,13 @@ The new checks found two cases of drift, both fixed: four settings missing from 
 
 `tools/check-log.sh` reports the new lines. *Headset: not yet tested.*
 
+**0.7.0.** Settings page and live settings.
+- `settingsschema.vrsettings` adds a "Mouse Laser" section to SteamVR's settings, the way Babble adds "Expression Tracking": a JSON file SteamVR draws, no UI code. It has sensitivity, invert vertical aim, wheel mode, the laser mode and Back buttons, the laser hand and (advanced) the switch-on delay.
+- Settings changed while running apply within a second: the driver re-reads them on `VREvent_AnyDriverSettingsChanged`, and every second in case drivers don't get that event. The log says which one noticed. Buttons, roles, the device filter and the reconnect grace time still need a SteamVR restart: the mouse thread reads them, or they change the device's role. The page marks them, and the log names them.
+- New checks keep the page, the code and the README in step.
+
+*Headset: not yet tested.*
+
 ## State
-- Current version: 0.6.3-experimental, built. The last version tested on the headset is 0.6.1.
+- Current version: 0.7.0-experimental, built. The last version tested on the headset is 0.6.1.
 - Nothing is vendored. The driver builds against SteamVR's bundled `openvr_driver.h`; the tests don't need it.

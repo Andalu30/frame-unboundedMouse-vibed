@@ -14,6 +14,7 @@
 #include <map>
 #include <random>
 #include <regex>
+#include <set>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -837,6 +838,72 @@ TEST_CASE("Validate keeps the buttons usable")
         s.backButton = BTN_FORWARD;
         CHECK(Validate(s).empty());
     }
+}
+
+// Describe()'s "key value, key value, ..." as a map.
+std::map<std::string, std::string> Described(const Settings &s)
+{
+    std::map<std::string, std::string> values;
+    std::stringstream line(Describe(s));
+    std::string pair;
+    while (std::getline(line, pair, ','))
+    {
+        pair.erase(0, pair.find_first_not_of(' '));
+        const auto space = pair.find(' ');
+        values[pair.substr(0, space)] = pair.substr(space + 1);
+    }
+    return values;
+}
+
+TEST_CASE("ApplyLive changes every setting it can and names the ones that need a restart")
+{
+    Settings current; // the defaults
+    Settings fresh;   // every setting different
+    fresh.sensitivityDeg = 0.08f;
+    fresh.toggleButton = BTN_SIDE;
+    fresh.backButton = -1;
+    fresh.role = k_roleLeftHand;
+    fresh.activeRole = k_roleRightHand;
+    fresh.nameFilter = "MX";
+    fresh.originOffsetY = -0.1f;
+    fresh.invertY = true;
+    fresh.claimDelayMs = 100;
+    fresh.pulseMs = 80;
+    fresh.reconnectGraceS = 30;
+    fresh.wheelSmooth = false;
+    fresh.wheelDeflection = 0.9f;
+    fresh.wheelSmoothMin = 0.6f;
+    fresh.wheelSmoothImpulse = 0.2f;
+    fresh.wheelSmoothHoldMs = 50;
+    fresh.wheelSmoothDecayMs = 100;
+    fresh.wheelPressMs = 70;
+    fresh.wheelReleaseMs = 40;
+    fresh.wheelMaxQueued = 5;
+    const auto before = Described(current);
+    const auto wanted = Described(fresh);
+    for (const auto &kv : wanted) // a new setting must be changed above too
+    {
+        INFO("setting " << kv.first);
+        CHECK(kv.second != before.at(kv.first));
+    }
+
+    const std::vector<std::string> needRestart = ApplyLive(current, fresh);
+    CHECK(needRestart == std::vector<std::string>{"toggleButton", "backButton", "role", "activeRole",
+                                                  "deviceNameFilter", "reconnectGraceS"});
+    // Every setting either changed now or is named as needing a restart; none is silently ignored.
+    std::set<std::string> unchanged;
+    for (const auto &kv : Described(current))
+    {
+        if (kv.second != wanted.at(kv.first))
+            unchanged.insert(kv.first);
+    }
+    CHECK(unchanged == std::set<std::string>(needRestart.begin(), needRestart.end()));
+}
+
+TEST_CASE("ApplyLive with the same settings names nothing")
+{
+    Settings current;
+    CHECK(ApplyLive(current, Settings{}).empty());
 }
 
 } // namespace

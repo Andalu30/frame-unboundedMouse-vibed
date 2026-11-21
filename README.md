@@ -75,7 +75,7 @@ KDE may pop up "could not read file `vrmonitor://driverinstalled`". That's harml
 Check that it loaded:
 ```sh
 grep -a 'mouselaser:' ~/.local/share/Steam/logs/vrserver.txt | tail
-# expect: "version 0.6.3-experimental", "settings: ...", "activated as device N, role 5", "using /dev/input/eventX (<your mouse>)"
+# expect: "version 0.7.0-experimental", "settings: ...", "activated as device N, role 5", "using /dev/input/eventX (<your mouse>)"
 ```
 Or run `tools/check-log.sh` for a summary (read-only).
 
@@ -85,7 +85,11 @@ Or run `tools/check-log.sh` for a summary (read-only).
 ```
 
 ## Settings
-Add any of these to `~/.config/openvr/config/steamvr.vrsettings` under a `"driver_mouselaser"` section. They are read once, when SteamVR starts. A value out of its range is corrected and logged as `setting ...`, and the log shows the values in use on a `settings: ...` line.
+The common ones are in SteamVR's settings, in a **Mouse Laser** section: sensitivity, invert vertical aim, wheel mode, the laser mode and Back buttons, and the laser hand. The switch-on delay is there too, among the advanced settings. All of them, including the rest, can also be set in `~/.config/openvr/config/steamvr.vrsettings` under a `"driver_mouselaser"` section. *The settings page is new in 0.7.0 and not yet tested on the headset.*
+
+The driver notices a change within a second and applies it right away. These need a SteamVR restart instead: `toggleButton`, `backButton`, `role`, `activeRole`, `deviceNameFilter`, `reconnectGraceS` and `enable`. On the Frame, restarting SteamVR also closes the desktop and everything in it, so you may prefer to reboot.
+
+A value out of its range is corrected and logged as `setting ...`. The log shows the values in use on a `settings: ...` line, and `settings changed ...` when they change.
 
 | key | default | meaning |
 |---|---|---|
@@ -143,7 +147,7 @@ If SteamVR won't come up properly after installing, there are four options:
 - While laser mode is on, the **real controller of the `activeRole` hand loses its laser** (the left one by default; confirmed by the owner). It gets it back when laser mode is switched off. Set `activeRole: 2` to borrow the right hand instead. With `role` 1 or 2 it happens all the time, because a hand role stays connected while off.
 - With a stylus role active (`activeRole: 0`), the mouse laser can aim and click but **can't drag overlays**: they follow your head. SteamVR's compositor only drags with hands or the head.
 - **Wheel feel is approximate.** A wheel isn't a stick: it only sends notches. Smooth mode only *simulates* a held stick, so it still won't feel exactly like a real thumbstick. Tune it with the `wheel*` settings.
-- Settings are only read when SteamVR starts.
+- Some settings only take effect after a SteamVR restart (see [Settings](#settings)).
 - **Back doesn't reach the KDE desktop.** SteamVR's laser Back goes to SteamVR overlays. Steam's UI handles it, but gamescope doesn't pass it on to the windows it hosts (a real controller's B behaves the same). With laser mode off, the side buttons don't work in KDE either, because the nested KWin's X11 backend drops X buttons 8 and up. See [docs/steam-frame-background.md](docs/steam-frame-background.md).
 - Two harmless log lines:
   - `steam.client (mouselaser) has no configured binding`: only the compositor bindings are provided, and Steam's own binding for the Frame controllers is haptics-only anyway.

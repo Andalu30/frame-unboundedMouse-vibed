@@ -1,0 +1,83 @@
+[
+	{
+		"title" : "Mouse Laser",
+		"controller" : "mouselaser_settings",
+		"values" : [
+			{
+				"name" : "/settings/driver_mouselaser/sensitivity",
+				"control" : "segment",
+				"label" : "Sensitivity",
+				"text" : "How far the laser turns per mouse count: 0.03, 0.05, 0.08 or 0.12 degrees. Other values can be set in steamvr.vrsettings.",
+				"options" : [
+					{ "value" : 0.03, "label" : "Low" },
+					{ "value" : 0.05, "label" : "Default" },
+					{ "value" : 0.08, "label" : "High" },
+					{ "value" : 0.12, "label" : "Very High" }
+				]
+			},
+			{
+				"name" : "/settings/driver_mouselaser/invertY",
+				"control" : "toggle",
+				"label" : "Invert Vertical Aim",
+				"on_label" : "On",
+				"off_label" : "Off"
+			},
+			{
+				"name" : "/settings/driver_mouselaser/wheelMode",
+				"control" : "segment",
+				"label" : "Wheel",
+				"text" : "The wheel acts like the thumbstick. Smooth: each notch pushes it and it eases back, and spinning scrolls continuously. Step: each notch is one flick.",
+				"options" : [
+					{ "value" : "smooth", "label" : "Smooth" },
+					{ "value" : "step", "label" : "Step" }
+				]
+			},
+			{
+				"name" : "/settings/driver_mouselaser/toggleButton",
+				"control" : "segment",
+				"label" : "Laser Mode Button",
+				"text" : "The mouse side button that switches laser mode on and off.",
+				"options" : [
+					{ "value" : 276, "label" : "Forward" },
+					{ "value" : 275, "label" : "Back" }
+				],
+				"requires_restart" : true
+			},
+			{
+				"name" : "/settings/driver_mouselaser/backButton",
+				"control" : "segment",
+				"label" : "Back Button",
+				"text" : "The mouse side button that sends SteamVR's laser Back while laser mode is on. It is off if it is also the laser mode button.",
+				"options" : [
+					{ "value" : 275, "label" : "Back" },
+					{ "value" : 276, "label" : "Forward" },
+					{ "value" : -1, "label" : "Off" }
+				],
+				"requires_restart" : true
+			},
+			{
+				"name" : "/settings/driver_mouselaser/activeRole",
+				"control" : "segment",
+				"label" : "Laser Hand",
+				"text" : "The hand the mouse takes over while laser mode is on. That controller has no laser of its own until laser mode is off.",
+				"options" : [
+					{ "value" : 1, "label" : "Left" },
+					{ "value" : 2, "label" : "Right" }
+				],
+				"requires_restart" : true
+			},
+			{
+				"name" : "/settings/driver_mouselaser/claimDelayMs",
+				"control" : "segment",
+				"label" : "Switch-on Delay (ms)",
+				"text" : "Raise it if the laser sometimes doesn't appear when laser mode is switched on.",
+				"options" : [
+					{ "value" : 50, "label" : "50" },
+					{ "value" : 100, "label" : "100" },
+					{ "value" : 200, "label" : "200" }
+				],
+				"advanced_only" : true
+			}
+		]
+	}
+]
