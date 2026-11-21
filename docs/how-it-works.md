@@ -1,6 +1,6 @@
 # How the driver works
 
-All code is in [`../src/driver.cpp`](../src/driver.cpp). Everything SteamVR loads lives in [`../driver/mouselaser/`](../driver/mouselaser/).
+The code is in two files. [`../src/core.h`](../src/core.h) holds the logic: settings, wheel, the on/off sequence and the aim maths. It has no SteamVR or system calls, so it is unit tested (see [testing.md](testing.md)). [`../src/driver.cpp`](../src/driver.cpp) does the I/O: it reads settings, reads and grabs the mouse, and talks to SteamVR. Everything SteamVR loads lives in [`../driver/mouselaser/`](../driver/mouselaser/).
 
 ## Pieces
 
@@ -34,10 +34,10 @@ vrcompositor
 - Mouse deltas: `yaw -= dx·k`, `pitch -= dy·k` (sign flipped if `invertY`), where `k = sensitivity·π/180`. Pitch is clamped to ±89°.
 - Orientation is **world-locked**: `q = yaw(Y) · pitch(X)` = `(cy·cp, cy·sp, sy·cp, −sy·sp)` with half-angle sines and cosines. OpenVR controllers point along −Z, so this aims the ray.
 - Position = HMD position + `(0, originOffsetY, 0)` in world space.
-- When inactive, it depends on `role`:
-  - **stylus (5, default since 0.5.0):** the device stays connected with a valid pose, but its ray is parked pointing straight up (yaw 0, pitch 90°) and every button is released. This matters because a device that goes invalid or disconnects is dropped as the laser pointer until SteamVR sees a new "user interaction". That took about 10 s of quiet in earlier captures, so a quick off/on left the mouse grabbed with no laser.
-  - **hand (1/2):** `deviceIsConnected = false` and `poseIsValid = false`, so the real controller of that hand gets its slot back. A connected device with a hand role would compete with it.
-  - ⚠️ **The code does the opposite (found 2026-10-09, confirmed 2026-11-19):** the `present` test in `RunFrame` is inverted (`active || IsRoleAllowedAsHand(role)`). In practice a stylus **disconnects** while off, and a hand role would stay connected. That's why every toggle logs `event 100/101`. The two bullets above describe the intent, not the actual behaviour. 0.6.1 keeps it on purpose, because it's the tested behaviour (see [development-log.md](development-log.md), entries 19 and 22).
+- When inactive, the ray is parked pointing straight up (yaw 0, pitch 90°) and every button is released. Whether the device stays connected depends on `role` (`present` in `RunFrame`: on, or `IsRoleAllowedAsHand(role)`):
+  - **stylus (5, the default):** reports itself **disconnected** (`deviceIsConnected` and `poseIsValid` false). SteamVR logs `event 101`/`100` (deactivated/activated) for it on every switch. It causes no visible problem, because switching on claims the laser explicitly (grip and bumper pulses).
+  - **hand (1/2):** stays connected with a valid pose, so it keeps that hand's slot and the real controller of that hand stays without its laser.
+  - Background: a device that goes invalid or disconnects is dropped as the laser pointer until SteamVR sees a new "user interaction". Before 0.6.0, when the driver didn't claim the laser explicitly, that made a quick off/on fail.
 
 ### Role and user path
 Since 0.5.1 the role changes with laser mode. The device registers with `role` (default stylus, 5). On each toggle, `RunFrame` sets `Prop_ControllerRoleHint_Int32` to `activeRole` (default left hand, 1) when switching on, or back to `role` when switching off, and logs `role N`. This is needed because dragging overlays only works with a hand (see below and the primer). SteamVR applies the change live: each switch is followed by `event 108` (role changed), and the owner reports laser and dragging working with 0.5.1.
@@ -53,7 +53,7 @@ The provider logs SteamVR events about our device, plus user-interaction, role-c
 | `/input/trigger/click`, `/value` | left button | `lasermouse/LeftClick`, `lasermouse_secondary/SwitchLaserHand` |
 | `/input/a/click` | right button | `lasermouse/RightClick` |
 | `/input/b/click` | middle button | `lasermouse/MiddleClick` |
-| `/input/grip/click` | **pulsed** (`pulseMs`) `claimDelayMs` after switching on, and again while still a hand when switching off | `quickmouse/ActivateQuickMouse`. A grip click **toggles** Laser Mouse ↔ Gamepad mode. Up to 0.5.1 it was held while active, so the mode flipped once per activation and never back (the "needs several presses" bug, D0). Since 0.6.0 the two pulses cancel out. |
+| `/input/grip/click` | **pulsed** (`pulseMs`) `claimDelayMs` after switching on, and again while still a hand when switching off | `quickmouse/ActivateQuickMouse`. A grip click **toggles** Laser Mouse ↔ Gamepad mode. Up to 0.5.1 it was held while active, so the mode flipped once per activation and never back (the "needs several presses" bug). Since 0.6.0 the two pulses cancel out. |
 | `/input/bumper/click` | pulsed right after the ON grip pulse (0.6.0) | `lasermouse_secondary/SwitchLaserHand` only: moves the laser to this device. |
 | `/input/thumbstick/y`, `/x` (+ `/touch`) | wheel → Y, tilt wheel → X, via `StickStepper` (see below) | `dualanalog/LeftValue`/`RightValue` (+ touch, mode `joystick`), `scroll_discrete` and `scroll_smooth` (mode `scroll`), the same as the Frame controller's stick |
 
@@ -67,7 +67,7 @@ Steam UI lists are navigated through the compositor's `/actions/dualanalog` stic
   - A single notch is about 130 ms above 0.5, which is one list step, followed by a short glide.
   - Spinning at 10 notches/s ramps up to a steady 0.8–1.0 hold, which scrolls continuously without dips.
   - Slow notches (3/s) remain separate steps.
-- These figures come from an offline 120 Hz simulation that drives `StickStepper` directly.
+- These figures come from a 120 Hz simulation of `StickStepper`: run `build/wheel_sim` (see [testing.md](testing.md)). The unit tests check the essentials.
 
 **step** (0.2.0 behaviour):
 - The stick is pushed to `±wheelDeflection` for `wheelPressMs`, then held at centre for `wheelReleaseMs`.
@@ -89,6 +89,6 @@ Steam UI lists are navigated through the compositor's `/actions/dualanalog` stic
 | `resources/localization/localization.json` | Display names (en_US, es_ES) for the controller type and its inputs, as shown in SteamVR's binding screens: "Left Click", "Mouse Wheel" and so on. |
 
 ## Changing things safely
-- After editing code: `cmake --build build`, then reboot. The `.so` is only loaded when SteamVR starts.
+- After editing code: run the tests (see [testing.md](testing.md)), `cmake --build build`, then reboot. The `.so` is only loaded when SteamVR starts. After the reboot, `tools/check-log.sh` summarises how the driver did.
 - After editing bindings or the profile: reboot. SteamVR may also cache bindings per controller type under `~/.local/share/Steam/config/` or `~/.config/openvr/`.
-- To add a setting: add it to `Settings::Load()`, add the default to `default.vrsettings`, and document it in the README table.
+- To add a setting: add it to `Settings` in `core.h` and `LoadSettings` in `driver.cpp`, add the default to `default.vrsettings`, and document it in the README table. The `resources` test checks that these agree.

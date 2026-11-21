@@ -21,10 +21,60 @@ set_target_properties(driver_mouselaser PROPERTIES
   PREFIX ""
   LIBRARY_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/driver/mouselaser/bin/linuxarm64)
 
-# Optional offline check of the wheel logic: cmake -DMOUSELASER_TESTS=ON ... && ./build/wheel_sim
-option(MOUSELASER_TESTS "Build the offline wheel simulation" OFF)
+# Tests: unit tests of src/core.h plus a check of the resource files. They don't need SteamVR,
+# so they run on any Linux machine. See docs/testing.md.
+#   cmake -S . -B build -DMOUSELASER_TESTS=ON && cmake --build build --target unit_tests wheel_sim
+#   ctest --test-dir build --output-on-failure
+option(MOUSELASER_TESTS "Build the unit tests and the wheel_sim tool" OFF)
+set(MOUSELASER_SANITIZE "" CACHE STRING "Sanitizers for the tests: address,undefined or thread (empty: none)")
 if(MOUSELASER_TESTS)
-  add_executable(wheel_sim tests/wheel_sim.cpp)
-  target_include_directories(wheel_sim PRIVATE ${OPENVR_HEADERS})
-  target_link_libraries(wheel_sim PRIVATE pthread)
+  enable_testing()
+  find_package(Threads REQUIRED)
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
+  # doctest: a single-header test framework, used by the tests only (the driver itself has no
+  # dependencies). Uses an installed copy if there is one, otherwise downloads a pinned release
+  # and checks its SHA-256.
+  find_path(DOCTEST_INCLUDE_DIR doctest/doctest.h DOC "Directory containing doctest/doctest.h")
+  if(DOCTEST_INCLUDE_DIR)
+    set(doctest_dir ${DOCTEST_INCLUDE_DIR})
+  else()
+    set(doctest_dir ${CMAKE_BINARY_DIR}/_deps/doctest)
+    set(doctest_h ${doctest_dir}/doctest/doctest.h)
+    set(doctest_sha256 cfd518a3ef90f67e1f3ba514df23fb3627437de1a2feeba78cf5062a40021421)
+    if(NOT EXISTS ${doctest_h})
+      message(STATUS "Downloading doctest 2.5.3 (test-only dependency)")
+      file(DOWNLOAD https://raw.githubusercontent.com/doctest/doctest/v2.5.3/doctest/doctest.h
+           ${doctest_h}.part STATUS status TLS_VERIFY ON)
+      list(GET status 0 status_code)
+      if(status_code EQUAL 0)
+        file(SHA256 ${doctest_h}.part got_sha256)
+      endif()
+      if(NOT status_code EQUAL 0 OR NOT got_sha256 STREQUAL doctest_sha256)
+        file(REMOVE ${doctest_h}.part)
+        message(FATAL_ERROR "Couldn't download doctest (${status}). "
+                            "Install it, or point -DDOCTEST_INCLUDE_DIR at a directory containing doctest/doctest.h.")
+      endif()
+      file(RENAME ${doctest_h}.part ${doctest_h})
+    endif()
+  endif()
+
+  add_executable(unit_tests tests/unit_tests.cpp)
+  add_executable(wheel_sim tools/wheel_sim.cpp) # prints wheel timelines, for tuning; not a test
+  foreach(target unit_tests wheel_sim)
+    target_include_directories(${target} PRIVATE src)
+    target_include_directories(${target} SYSTEM PRIVATE ${doctest_dir}) # no warnings from its header
+    target_compile_options(${target} PRIVATE -Wall -Wextra -Wshadow -Wconversion)
+    target_compile_definitions(${target} PRIVATE MOUSELASER_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    target_link_libraries(${target} PRIVATE Threads::Threads)
+    if(MOUSELASER_SANITIZE)
+      target_compile_options(${target} PRIVATE -fsanitize=${MOUSELASER_SANITIZE} -fno-sanitize-recover=all
+                                               -fno-omit-frame-pointer)
+      target_link_options(${target} PRIVATE -fsanitize=${MOUSELASER_SANITIZE})
+    endif()
+  endforeach()
+
+  add_test(NAME unit_tests COMMAND unit_tests)
+  add_test(NAME resources COMMAND Python3::Interpreter -I ${CMAKE_SOURCE_DIR}/tests/check_resources.py
+                                  ${CMAKE_SOURCE_DIR})
 endif()
