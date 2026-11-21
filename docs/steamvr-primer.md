@@ -224,7 +224,7 @@ SteamVR tracks whether each device is in use and sends events about it. Ones we'
 | `TrackedDeviceRoleChanged` | 108 | Hand assignments changed. |
 | `PropertyChanged` | 111 | A device property changed. Many at startup. |
 
-These matter because **the compositor uses them to decide which device drives the laser** (section 8). A driver can see them with `VRServerDriverHost()->PollNextEvent()`. Since 0.5.0 the driver logs them as `mouselaser: event N device M`. One unexplained observation: our device gets 100/101 on every toggle even though it stays connected.
+These matter because **the compositor uses them to decide which device drives the laser** (section 8). A driver can see them with `VRServerDriverHost()->PollNextEvent()`. From 0.5.0 to 0.6.2 the driver logged them as `mouselaser: event N device M`. Our device gets 100/101 on every toggle because, as a stylus, it reports itself disconnected while off.
 
 ---
 
@@ -451,7 +451,7 @@ XDG_RUNTIME_DIR=/run/user/1000 systemctl --user status gamescope-session
 
 ## 15. Open questions
 - **Stylus role:** the compositor accepts a `/user/stylus` pointer for aiming and clicking, but not for dragging overlays (see section 8). Switching role at runtime (stylus while off, hand while on) works (0.5.1). The cost: while laser mode is on, the real left controller loses its laser, because the mouse holds the left-hand slot.
-- **Exactly how the compositor picks the pointer device.** Is it interaction events, `SwitchLaserHand`, or something else? The 0.5.0 event logging is meant to answer this.
+- **Exactly how the compositor picks the pointer device.** Is it interaction events, `SwitchLaserHand`, or something else? Logging every event a driver gets (0.5.0 to 0.6.2) didn't answer it: event 525 (dashboard device changed) never reaches drivers. Since 0.6.0 the driver sidesteps it with the `SwitchLaserHand` bumper pulse.
 - **Is there a driver-side signal for "the laser is up"?** It would let the driver grab the mouse only when the laser actually works.
 - **The mailbox.** Does it need a `?secret=`, and what does `dump_laser_overlays` return?
 - **KWin on the Wayland backend.** Would it fix back/forward buttons, and does gamescope show it properly?

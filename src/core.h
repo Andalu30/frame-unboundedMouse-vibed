@@ -3,12 +3,12 @@
 // unit tested on any Linux machine (tests/unit_tests.cpp). driver.cpp does the I/O: it reads the
 // settings and the mouse, talks to SteamVR, and calls into the pieces below.
 //
-//   Settings      every tunable, with its default
+//   Settings      every tunable, with its default; Validate() and Describe() for the log
 //   StickStepper  wheel notches -> thumbstick deflection over time
 //   LatchedButton a click shorter than one frame still shows up for one frame
 //   MouseState    what the mouse did since the last frame (shared between threads)
-//   HandleEvent   one evdev event -> MouseState
-//   IsWantedMouse which /dev/input device to use
+//   HandleEvent   one evdev event -> MouseState; EventStream adds the kernel's lost-events case
+//   RateMouse     which /dev/input device to use
 //   LaserSession  the on/off hand-over sequence with SteamVR's laser
 //   Aim           ray direction maths
 //
@@ -21,7 +21,9 @@
 #include <chrono>
 #include <cmath>
 #include <cstddef>
+#include <sstream>
 #include <string>
+#include <vector>
 
 #include <linux/input.h>
 
@@ -72,6 +74,108 @@ struct Settings
     int pulseMs = 60;             // length of each grip / bumper pulse
     float reconnectGraceS = 60.f; // keep laser mode this long while the mouse is gone (sleep)
 };
+
+inline bool IsRole(int role) { return role == k_roleLeftHand || role == k_roleRightHand || role == k_roleStylus; }
+
+namespace detail // helpers for Validate below
+{
+// Puts `value` back inside [lo, hi] if it is outside, and says so in `problems`. A template, so
+// the same code serves int and float settings (T is the setting's type).
+template <typename T> void Clamp(std::vector<std::string> &problems, const char *key, T &value, T lo, T hi)
+{
+    if (value >= lo && value <= hi)
+        return;
+    const T fixed = value > hi ? hi : lo;
+    std::ostringstream m;
+    m << key << " " << value << " is outside " << lo << " to " << hi << ", using " << fixed;
+    problems.push_back(m.str());
+    value = fixed;
+}
+
+// Puts `value` back to `fallback`, for a value that can't work; `why` says why, for the log.
+inline void Replace(std::vector<std::string> &problems, const char *key, int &value, int fallback, const char *why)
+{
+    std::ostringstream m;
+    m << key << " " << value << " " << why << ", using " << fallback;
+    problems.push_back(m.str());
+    value = fallback;
+}
+} // namespace detail
+
+// The settings come from a file edited by hand, so any value can be out of range. Validate()
+// brings each one back into a range the driver works with, and returns one message per change
+// for the log. Numbers are clamped to their range; a value that has to be one of a few choices
+// (a role, a button) goes back to its default.
+inline std::vector<std::string> Validate(Settings &s)
+{
+    using detail::Clamp;
+    using detail::Replace;
+    std::vector<std::string> problems;
+    const Settings defaults;
+
+    Clamp(problems, "sensitivity", s.sensitivityDeg, 0.001f, 1.f);
+    Clamp(problems, "originOffsetY", s.originOffsetY, -1.f, 1.f);
+
+    // Buttons are evdev key codes, 1 to KEY_MAX. The left button is the laser's click, so it
+    // can't be the toggle. Back can't share a button that already does something: HandleEvent
+    // would never get to it.
+    if (s.toggleButton < 1 || s.toggleButton > KEY_MAX || s.toggleButton == BTN_LEFT)
+        Replace(problems, "toggleButton", s.toggleButton, defaults.toggleButton,
+                "is not a key code other than 272 (left)");
+    if (s.backButton != -1 && (s.backButton < 1 || s.backButton > KEY_MAX))
+        Replace(problems, "backButton", s.backButton, defaults.backButton, "is not -1 or a key code");
+    if (s.backButton == s.toggleButton || s.backButton == BTN_LEFT || s.backButton == BTN_RIGHT ||
+        s.backButton == BTN_MIDDLE)
+        Replace(problems, "backButton", s.backButton, -1, "is already the toggle or a click button");
+
+    if (!IsRole(s.role))
+        Replace(problems, "role", s.role, defaults.role, "is not 1, 2 or 5");
+    if (s.activeRole != 0 && !IsRole(s.activeRole))
+        Replace(problems, "activeRole", s.activeRole, defaults.activeRole, "is not 0, 1, 2 or 5");
+
+    Clamp(problems, "claimDelayMs", s.claimDelayMs, 0, 2000);
+    Clamp(problems, "pulseMs", s.pulseMs, 10, 1000);
+    Clamp(problems, "reconnectGraceS", s.reconnectGraceS, 0.f, 3600.f);
+
+    // The stick's range is -1 to 1.
+    Clamp(problems, "wheelDeflection", s.wheelDeflection, 0.f, 1.f);
+    Clamp(problems, "wheelSmoothMin", s.wheelSmoothMin, 0.f, s.wheelDeflection);
+    Clamp(problems, "wheelSmoothImpulse", s.wheelSmoothImpulse, 0.f, 1.f);
+    Clamp(problems, "wheelSmoothHoldMs", s.wheelSmoothHoldMs, 0, 2000);
+    Clamp(problems, "wheelSmoothDecayMs", s.wheelSmoothDecayMs, 1, 5000);
+    Clamp(problems, "wheelPressMs", s.wheelPressMs, 1, 1000);
+    Clamp(problems, "wheelReleaseMs", s.wheelReleaseMs, 0, 1000);
+    Clamp(problems, "wheelMaxQueued", s.wheelMaxQueued, 1, 100); // 0 would silence step mode
+    return problems;
+}
+
+// The settings in use, as one line for the log, named as in steamvr.vrsettings.
+inline std::string Describe(const Settings &s)
+{
+    std::ostringstream o;
+    o << std::boolalpha; // bools as true/false
+    o << "sensitivity " << s.sensitivityDeg;
+    o << ", toggleButton " << s.toggleButton;
+    o << ", backButton " << s.backButton;
+    o << ", role " << s.role;
+    o << ", activeRole " << s.activeRole;
+    o << ", deviceNameFilter \"" << s.nameFilter << '"';
+    o << ", originOffsetY " << s.originOffsetY;
+    o << ", invertY " << s.invertY;
+    o << ", claimDelayMs " << s.claimDelayMs;
+    o << ", pulseMs " << s.pulseMs;
+    o << ", reconnectGraceS " << s.reconnectGraceS;
+    o << ", wheelMode " << (s.wheelSmooth ? "smooth" : "step");
+    o << ", wheelDeflection " << s.wheelDeflection;
+    o << ", wheelSmoothMin " << s.wheelSmoothMin;
+    o << ", wheelSmoothImpulse " << s.wheelSmoothImpulse;
+    o << ", wheelSmoothHoldMs " << s.wheelSmoothHoldMs;
+    o << ", wheelSmoothDecayMs " << s.wheelSmoothDecayMs;
+    o << ", wheelPressMs " << s.wheelPressMs;
+    o << ", wheelReleaseMs " << s.wheelReleaseMs;
+    o << ", wheelMaxQueued " << s.wheelMaxQueued;
+    return o.str();
+}
 
 // Turns wheel notches on one axis into thumbstick deflection, in "smooth" or "step" mode
 // (see Settings). A change of direction drops whatever was still pending the other way.
@@ -203,6 +307,7 @@ enum class EventAction
 {
     None,
     Toggle, // the toggle button was released: the caller grabs or releases the mouse
+    Resync, // the kernel lost events: the caller reads the buttons' state and calls SyncButtons
 };
 
 // Applies one evdev event (struct input_event from <linux/input.h>) to `m`.
@@ -244,6 +349,34 @@ inline EventAction HandleEvent(MouseState &m, const Settings &s, const input_eve
     return EventAction::None;
 }
 
+// The events of one open device. Adds one case to HandleEvent: if the reader falls behind, the
+// kernel throws events away and sends SYN_DROPPED. What follows, up to the next SYN_REPORT, is
+// incomplete and has to be ignored, and the buttons read afresh: a lost release would otherwise
+// leave a button held down. (A lost toggle-button click is just lost; press it again.)
+class EventStream
+{
+public:
+    EventAction Handle(MouseState &m, const Settings &s, const input_event &ev)
+    {
+        if (ev.type == EV_SYN && ev.code == SYN_DROPPED)
+        {
+            m_dropping = true;
+            return EventAction::None;
+        }
+        if (m_dropping)
+        {
+            if (ev.type != EV_SYN || ev.code != SYN_REPORT)
+                return EventAction::None;
+            m_dropping = false;
+            return EventAction::Resync;
+        }
+        return HandleEvent(m, s, ev);
+    }
+
+private:
+    bool m_dropping = false;
+};
+
 // The kernel describes an input device's capabilities as bitmaps: bit N of `key` is set if the
 // device has key/button code N, and so on. Sized as the kernel's EVIOCGBIT ioctl expects.
 constexpr std::size_t BitmapLongs(int maxCode)
@@ -270,17 +403,41 @@ struct InputDeviceInfo
 
 constexpr unsigned k_valveVendorId = 0x28de;
 
-// True if `d` looks like the mouse to use: relative X/Y motion and a left button. Valve's own
-// emulated mice (e.g. "Steam Ctrl (BT) ... Mouse") are skipped unless nameFilter asks for them.
-inline bool IsWantedMouse(const InputDeviceInfo &d, const std::string &nameFilter)
+// After EventAction::Resync: sets the buttons from `keys`, the device's key bitmap as it is now
+// (EVIOCGKEY). Only while active, like HandleEvent.
+inline void SyncButtons(MouseState &m, const Settings &s, const unsigned long *keys)
 {
-    if (nameFilter.empty() && (d.vendor == k_valveVendorId || d.name.find("Steam") != std::string::npos))
-        return false;
-    if (!TestBit(d.ev, EV_REL) || !TestBit(d.ev, EV_KEY))
-        return false;
-    if (!TestBit(d.rel, REL_X) || !TestBit(d.rel, REL_Y) || !TestBit(d.key, BTN_LEFT))
-        return false;
-    return nameFilter.empty() || d.name.find(nameFilter) != std::string::npos;
+    if (!m.active)
+        return;
+    m.left.Set(TestBit(keys, BTN_LEFT));
+    m.right.Set(TestBit(keys, BTN_RIGHT));
+    m.middle.Set(TestBit(keys, BTN_MIDDLE));
+    if (s.backButton >= 1 && s.backButton <= KEY_MAX)
+        m.back.Set(TestBit(keys, s.backButton));
+}
+
+// How well an input device fits as the mouse to use, from worst to best. The driver looks at
+// every /dev/input/event* node and uses the best one (on a tie, the first it finds).
+enum class MouseFit
+{
+    NotAMouse,      // no relative X/Y motion or no left button: keyboards, touchpads, ...
+    ValveDevice,    // Valve's own emulated mice ("Steam Ctrl (BT) ... Mouse"), unless deviceNameFilter is set
+    FilteredOut,    // a mouse whose name doesn't contain deviceNameFilter
+    NoToggleButton, // a mouse without the toggle button: usable, but laser mode can't be switched on
+    Good,
+};
+
+inline MouseFit RateMouse(const InputDeviceInfo &d, const Settings &s)
+{
+    if (!TestBit(d.ev, EV_REL) || !TestBit(d.ev, EV_KEY) || !TestBit(d.rel, REL_X) || !TestBit(d.rel, REL_Y) ||
+        !TestBit(d.key, BTN_LEFT))
+        return MouseFit::NotAMouse;
+    if (s.nameFilter.empty() && (d.vendor == k_valveVendorId || d.name.find("Steam") != std::string::npos))
+        return MouseFit::ValveDevice;
+    if (!s.nameFilter.empty() && d.name.find(s.nameFilter) == std::string::npos)
+        return MouseFit::FilteredOut;
+    const bool hasToggle = s.toggleButton >= 1 && s.toggleButton <= KEY_MAX && TestBit(d.key, s.toggleButton);
+    return hasToggle ? MouseFit::Good : MouseFit::NoToggleButton;
 }
 
 // Switching laser mode on and off, one RunFrame at a time.

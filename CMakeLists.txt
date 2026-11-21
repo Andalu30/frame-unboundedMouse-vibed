@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: MIT
 cmake_minimum_required(VERSION 3.20)
-project(mouselaser CXX)
+# The driver's version. It is logged at startup ("mouselaser: version ..."), so bump it on every
+# behaviour change to tell builds apart on the headset.
+project(mouselaser VERSION 0.6.3 LANGUAGES CXX)
+set(MOUSELASER_VERSION "${PROJECT_VERSION}-experimental")
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -21,14 +24,25 @@ if(MOUSELASER_WERROR)
   list(APPEND MOUSELASER_WARNINGS -Werror)
 endif()
 
+# SteamVR loads a driver from bin/<platform>: linuxarm64 on the Frame, linux64 on an x86_64 PC.
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
+  set(MOUSELASER_PLATFORM linuxarm64)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$")
+  set(MOUSELASER_PLATFORM linux64)
+else()
+  set(MOUSELASER_PLATFORM linux-${CMAKE_SYSTEM_PROCESSOR})
+  message(WARNING "SteamVR has no driver folder for ${CMAKE_SYSTEM_PROCESSOR}; using bin/${MOUSELASER_PLATFORM}")
+endif()
+
 add_library(driver_mouselaser SHARED src/driver.cpp)
 # SYSTEM: warnings from inside Valve's header are not ours to fix, so the compiler skips them.
 target_include_directories(driver_mouselaser SYSTEM PRIVATE ${OPENVR_HEADERS})
 target_compile_options(driver_mouselaser PRIVATE ${MOUSELASER_WARNINGS} -fvisibility=hidden)
+target_compile_definitions(driver_mouselaser PRIVATE MOUSELASER_VERSION="${MOUSELASER_VERSION}")
 target_link_libraries(driver_mouselaser PRIVATE pthread)
 set_target_properties(driver_mouselaser PROPERTIES
   PREFIX ""
-  LIBRARY_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/driver/mouselaser/bin/linuxarm64)
+  LIBRARY_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/driver/mouselaser/bin/${MOUSELASER_PLATFORM})
 
 # Tests: unit tests of src/core.h plus a check of the resource files. They don't need SteamVR,
 # so they run on any Linux machine. See docs/testing.md.

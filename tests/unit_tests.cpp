@@ -385,6 +385,63 @@ TEST_CASE("Clear drops pending movement and clicks")
     CHECK_FALSE(m.left.Read());
 }
 
+// SYN_DROPPED: the kernel lost events because the reader fell behind.
+TEST_CASE("after SYN_DROPPED, events are ignored up to the next SYN_REPORT, then a resync is asked for")
+{
+    MouseState m;
+    m.active = true;
+    const Settings s;
+    EventStream events;
+    CHECK(events.Handle(m, s, Ev(EV_REL, REL_X, 5)) == EventAction::None);
+    CHECK(events.Handle(m, s, Ev(EV_SYN, SYN_DROPPED, 0)) == EventAction::None);
+    CHECK(events.Handle(m, s, Ev(EV_REL, REL_X, 100)) == EventAction::None);   // incomplete: ignored
+    CHECK(events.Handle(m, s, Ev(EV_KEY, BTN_EXTRA, 0)) == EventAction::None); // even the toggle
+    CHECK(events.Handle(m, s, Ev(EV_SYN, SYN_REPORT, 0)) == EventAction::Resync);
+    CHECK(m.dx.exchange(0) == 5);
+    // back to normal afterwards
+    CHECK(events.Handle(m, s, Ev(EV_REL, REL_X, 7)) == EventAction::None);
+    CHECK(m.dx.exchange(0) == 7);
+    CHECK(events.Handle(m, s, Ev(EV_KEY, BTN_EXTRA, 0)) == EventAction::Toggle);
+}
+
+TEST_CASE("a button release lost to SYN_DROPPED doesn't leave the button held")
+{
+    MouseState m;
+    m.active = true;
+    Settings s;
+    EventStream events;
+    events.Handle(m, s, Ev(EV_KEY, BTN_LEFT, 1));
+    events.Handle(m, s, Ev(EV_KEY, BTN_SIDE, 1)); // back
+    CHECK(m.left.Read());                         // both presses are seen (and their latches read)
+    CHECK(m.back.Read());
+    // The releases are among the lost events; the kernel's key state says both are up now and
+    // the right button is down.
+    events.Handle(m, s, Ev(EV_SYN, SYN_DROPPED, 0));
+    events.Handle(m, s, Ev(EV_KEY, BTN_LEFT, 0));
+    REQUIRE(events.Handle(m, s, Ev(EV_SYN, SYN_REPORT, 0)) == EventAction::Resync);
+    unsigned long keys[BitmapLongs(KEY_MAX)] = {};
+    keys[BTN_RIGHT / (8 * sizeof(unsigned long))] |= 1UL << (BTN_RIGHT % (8 * sizeof(unsigned long)));
+    SyncButtons(m, s, keys);
+    CHECK_FALSE(m.left.Read());
+    CHECK_FALSE(m.back.Read());
+    CHECK(m.right.Read());
+
+    SUBCASE("nothing changes while inactive")
+    {
+        m.Clear();
+        m.active = false;
+        SyncButtons(m, s, keys);
+        CHECK_FALSE(m.right.Read());
+    }
+    SUBCASE("backButton -1 is left alone")
+    {
+        s.backButton = -1;
+        m.back.Set(true);
+        SyncButtons(m, s, keys);
+        CHECK(m.back.Read());
+    }
+}
+
 TEST_CASE("no mouse movement is lost between the reader thread and the frame thread")
 {
     // Also the test to run under ThreadSanitizer (-DMOUSELASER_SANITIZE=thread).
@@ -407,7 +464,7 @@ TEST_CASE("no mouse movement is lost between the reader thread and the frame thr
 }
 
 // ---------------------------------------------------------------------------------------------
-// IsWantedMouse: which /dev/input device to use.
+// RateMouse: which /dev/input device to use.
 
 void SetBit(unsigned long *bits, int bit)
 {
@@ -429,13 +486,42 @@ InputDeviceInfo Mouse(const std::string &name, unsigned vendor = 0x1234)
     return d;
 }
 
-TEST_CASE("an ordinary mouse is picked") { CHECK(IsWantedMouse(Mouse("MCHOSE G3 A Mouse"), "")); }
+MouseFit Rate(const InputDeviceInfo &d, const std::string &nameFilter = "")
+{
+    Settings s;
+    s.nameFilter = nameFilter;
+    return RateMouse(d, s);
+}
+
+void ClearBit(unsigned long *bits, int bit)
+{
+    const auto b = static_cast<unsigned>(bit);
+    bits[b / (8 * sizeof(unsigned long))] &= ~(1UL << (b % (8 * sizeof(unsigned long))));
+}
+
+TEST_CASE("an ordinary mouse is picked") { CHECK(Rate(Mouse("MCHOSE G3 A Mouse")) == MouseFit::Good); }
 
 TEST_CASE("Valve's emulated mice are skipped unless the name filter asks for them")
 {
-    CHECK_FALSE(IsWantedMouse(Mouse("Valve Software Steam Controller", k_valveVendorId), ""));
-    CHECK_FALSE(IsWantedMouse(Mouse("Steam Ctrl (BT) Mouse"), ""));
-    CHECK(IsWantedMouse(Mouse("Steam Ctrl (BT) Mouse"), "Steam Ctrl"));
+    CHECK(Rate(Mouse("Valve Software Steam Controller", k_valveVendorId)) == MouseFit::ValveDevice);
+    CHECK(Rate(Mouse("Steam Ctrl (BT) Mouse")) == MouseFit::ValveDevice);
+    CHECK(Rate(Mouse("Steam Ctrl (BT) Mouse"), "Steam Ctrl") == MouseFit::Good);
+}
+
+TEST_CASE("a mouse with the toggle button beats one without")
+{
+    InputDeviceInfo threeButtons = Mouse("Basic Mouse");
+    ClearBit(threeButtons.key, BTN_SIDE);
+    ClearBit(threeButtons.key, BTN_EXTRA);
+    CHECK(Rate(threeButtons) == MouseFit::NoToggleButton);
+    CHECK(Rate(Mouse("MCHOSE G3 A Mouse")) > Rate(threeButtons));
+    // but it is still a usable mouse, better than anything skipped
+    CHECK(Rate(threeButtons) > MouseFit::FilteredOut);
+    CHECK(Rate(threeButtons) > MouseFit::ValveDevice);
+
+    Settings s; // a different toggleButton is looked for instead
+    s.toggleButton = BTN_MIDDLE;
+    CHECK(RateMouse(threeButtons, s) == MouseFit::Good);
 }
 
 TEST_CASE("devices that aren't mice are skipped")
@@ -448,7 +534,7 @@ TEST_CASE("devices that aren't mice are skipped")
         SetBit(d.ev, EV_REL);
         SetBit(d.rel, REL_HWHEEL);
         SetBit(d.key, KEY_VOLUMEUP);
-        CHECK_FALSE(IsWantedMouse(d, ""));
+        CHECK(Rate(d) == MouseFit::NotAMouse);
     }
     SUBCASE("a touchpad: absolute axes, no relative ones")
     {
@@ -457,20 +543,20 @@ TEST_CASE("devices that aren't mice are skipped")
         SetBit(d.ev, EV_KEY);
         SetBit(d.ev, EV_ABS);
         SetBit(d.key, BTN_LEFT);
-        CHECK_FALSE(IsWantedMouse(d, ""));
+        CHECK(Rate(d) == MouseFit::NotAMouse);
     }
     SUBCASE("relative motion but no left button")
     {
         InputDeviceInfo d = Mouse("Odd device");
-        d.key[BTN_LEFT / (8 * sizeof(unsigned long))] = 0;
-        CHECK_FALSE(IsWantedMouse(d, ""));
+        ClearBit(d.key, BTN_LEFT);
+        CHECK(Rate(d) == MouseFit::NotAMouse);
     }
 }
 
 TEST_CASE("deviceNameFilter picks by substring")
 {
-    CHECK(IsWantedMouse(Mouse("Logitech MX Master 3"), "MX Master"));
-    CHECK_FALSE(IsWantedMouse(Mouse("Logitech MX Master 3"), "G502"));
+    CHECK(Rate(Mouse("Logitech MX Master 3"), "MX Master") == MouseFit::Good);
+    CHECK(Rate(Mouse("Logitech MX Master 3"), "G502") == MouseFit::FilteredOut);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -607,7 +693,8 @@ TEST_CASE("Reset drops queued notches")
 }
 
 // ---------------------------------------------------------------------------------------------
-// Settings: the defaults in core.h must match the ones SteamVR loads from default.vrsettings.
+// Settings: the defaults in core.h must match the ones SteamVR loads from default.vrsettings, and
+// Validate() keeps bad values from the file harmless.
 
 // Reads the flat "key": value pairs of default.vrsettings.
 std::map<std::string, std::string> ReadDefaultSettings()
@@ -655,6 +742,101 @@ TEST_CASE("Settings defaults match default.vrsettings")
     CHECK(num("wheelPressMs") == d.wheelPressMs);
     CHECK(num("wheelReleaseMs") == d.wheelReleaseMs);
     CHECK(num("wheelMaxQueued") == d.wheelMaxQueued);
+}
+
+TEST_CASE("Describe names every setting in default.vrsettings")
+{
+    const std::string line = Describe(Settings{});
+    for (const auto &kv : ReadDefaultSettings())
+    {
+        // the section's name, and `enable` (read before the others, logged on its own when false)
+        if (kv.first == "driver_mouselaser" || kv.first == "enable")
+            continue;
+        INFO("key " << kv.first);
+        CHECK(line.find(kv.first + " ") != std::string::npos);
+    }
+    CHECK(line.find("sensitivity 0.05,") != std::string::npos);
+    CHECK(line.find("invertY false,") != std::string::npos);
+    CHECK(line.find("wheelMode smooth,") != std::string::npos);
+}
+
+TEST_CASE("the defaults pass Validate unchanged")
+{
+    Settings s;
+    CHECK(Validate(s).empty());
+}
+
+TEST_CASE("Validate clamps numbers to their range and says so")
+{
+    Settings s;
+    s.sensitivityDeg = 5;
+    s.pulseMs = -20;
+    s.wheelMaxQueued = 0;
+    s.wheelDeflection = 0.8f;
+    s.wheelSmoothMin = 0.9f; // above the maximum deflection
+    const auto problems = Validate(s);
+    CHECK(problems.size() == 4);
+    CHECK(s.sensitivityDeg == 1.f);
+    CHECK(s.pulseMs == 10);
+    CHECK(s.wheelMaxQueued == 1);
+    CHECK(s.wheelSmoothMin == 0.8f);
+    REQUIRE_FALSE(problems.empty());
+    CHECK(problems[0] == "sensitivity 5 is outside 0.001 to 1, using 1");
+    CHECK(Validate(s).empty()); // once fixed, nothing more to say
+}
+
+TEST_CASE("Validate puts back the default for a role that doesn't exist")
+{
+    Settings s;
+    s.role = 0;       // Invalid
+    s.activeRole = 3; // OptOut
+    CHECK(Validate(s).size() == 2);
+    CHECK(s.role == k_roleStylus);
+    CHECK(s.activeRole == k_roleLeftHand);
+
+    s.role = k_roleRightHand; // every real choice is kept
+    s.activeRole = 0;
+    CHECK(Validate(s).empty());
+}
+
+TEST_CASE("Validate keeps the buttons usable")
+{
+    Settings s;
+    SUBCASE("the left button can't be the toggle")
+    {
+        s.toggleButton = BTN_LEFT;
+        CHECK(Validate(s).size() == 1);
+        CHECK(s.toggleButton == BTN_EXTRA);
+    }
+    SUBCASE("a code that isn't a key")
+    {
+        s.toggleButton = 99999;
+        s.backButton = -5;
+        CHECK(Validate(s).size() == 2);
+        CHECK(s.toggleButton == BTN_EXTRA);
+        CHECK(s.backButton == BTN_SIDE);
+    }
+    SUBCASE("toggle moved to the back button: Back is switched off rather than unreachable")
+    {
+        s.toggleButton = BTN_SIDE; // backButton is still its default, BTN_SIDE
+        const auto problems = Validate(s);
+        REQUIRE(problems.size() == 1);
+        CHECK(problems[0] == "backButton 275 is already the toggle or a click button, using -1");
+        CHECK(s.backButton == -1);
+    }
+    SUBCASE("Back on a button that already clicks")
+    {
+        s.backButton = BTN_RIGHT;
+        CHECK(Validate(s).size() == 1);
+        CHECK(s.backButton == -1);
+    }
+    SUBCASE("-1 and a free button are fine")
+    {
+        s.backButton = -1;
+        CHECK(Validate(s).empty());
+        s.backButton = BTN_FORWARD;
+        CHECK(Validate(s).empty());
+    }
 }
 
 } // namespace

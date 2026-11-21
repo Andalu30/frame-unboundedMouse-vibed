@@ -9,7 +9,8 @@ Run by ctest (see CMakeLists.txt), or directly: python3 tests/check_resources.py
   default.vrsettings and the README agree on the default values;
 - every binding for the left hand is repeated for the right hand and the stylus;
 - the input profile, the components the code creates and the localization labels match;
-- names and file references between manifest, profile and bindings resolve.
+- names and file references between manifest, profile and bindings resolve;
+- the version in CMakeLists.txt is the one the README and the development log mention.
 """
 
 import json
@@ -107,6 +108,16 @@ for b in profile.get("default_bindings", []):
 model = re.search(r'Prop_RenderModelName_String, "\{mouselaser\}(\w+)"', SOURCE)
 check(model is not None and (RES / "rendermodels" / model.group(1)).is_dir(),
       "render model named in driver.cpp exists under resources/rendermodels")
+
+# --- version ---------------------------------------------------------------------------------------
+cmake_version = re.search(r"project\(mouselaser VERSION ([\d.]+)", (ROOT / "CMakeLists.txt").read_text())
+check(cmake_version is not None, "CMakeLists.txt sets the version in project()")
+if cmake_version:
+    version = cmake_version.group(1)
+    devlog = (ROOT / "docs" / "development-log.md").read_text()
+    check(f'"version {version}-experimental"' in readme, f"README expects version {version}-experimental in the log")
+    check(f"**{version}.**" in devlog, f"development log has an entry for {version}")
+    check(f"Current version: {version}-experimental" in devlog, f"development log's current version is {version}")
 
 print(f"\n{len(failures)} failure(s)")
 sys.exit(1 if failures else 0)
