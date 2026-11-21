@@ -33,9 +33,9 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
-#include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <thread>
 #include <utility>
@@ -54,9 +54,14 @@ static_assert(k_roleLeftHand == TrackedControllerRole_LeftHand && k_roleRightHan
                   k_roleStylus == TrackedControllerRole_Stylus,
               "core.h role numbers must match OpenVR's ETrackedControllerRole");
 
+// The version comes from project() in CMakeLists.txt, which passes it in as MOUSELASER_VERSION.
+#ifndef MOUSELASER_VERSION
+#error "MOUSELASER_VERSION is not set: build with CMake (see the README)"
+#endif
+
 // `static` at file scope: visible only inside this file, not exported from the .so.
 static constexpr const char *k_section = "driver_mouselaser";
-static constexpr const char *k_version = "0.6.2-experimental";
+static constexpr const char *k_version = MOUSELASER_VERSION;
 
 // printf-style logging into vrserver.txt (SteamVR prefixes each line with "mouselaser: ").
 // The format attribute makes the compiler check every call's arguments against `fmt`.
@@ -82,11 +87,21 @@ static std::string ErrorText(int err)
 // ReadSetting(key, out) overwrites `out` with the driver_mouselaser value of `key`, if SteamVR has
 // one: set by the user, or else taken from driver/mouselaser/resources/settings/default.vrsettings.
 // Otherwise `out` keeps its default from core.h's Settings. One overload per value type.
+// Every key is in default.vrsettings, so an error means the user's value couldn't be read
+// (a wrong type, for example): say so, rather than silently using the default.
+static bool SettingRead(const char *key, EVRSettingsError err)
+{
+    if (err == VRSettingsError_None)
+        return true;
+    Log("setting %s can't be read (%s), using the default\n", key, VRSettings()->GetSettingsErrorNameFromEnum(err));
+    return false;
+}
+
 static void ReadSetting(const char *key, float &out)
 {
     EVRSettingsError err = VRSettingsError_None;
     const float value = VRSettings()->GetFloat(k_section, key, &err);
-    if (err == VRSettingsError_None)
+    if (SettingRead(key, err))
         out = value;
 }
 
@@ -94,7 +109,7 @@ static void ReadSetting(const char *key, int &out)
 {
     EVRSettingsError err = VRSettingsError_None;
     const int32_t value = VRSettings()->GetInt32(k_section, key, &err);
-    if (err == VRSettingsError_None)
+    if (SettingRead(key, err))
         out = value;
 }
 
@@ -102,7 +117,7 @@ static void ReadSetting(const char *key, bool &out)
 {
     EVRSettingsError err = VRSettingsError_None;
     const bool value = VRSettings()->GetBool(k_section, key, &err);
-    if (err == VRSettingsError_None)
+    if (SettingRead(key, err))
         out = value;
 }
 
@@ -111,7 +126,7 @@ static void ReadSetting(const char *key, std::string &out)
     EVRSettingsError err = VRSettingsError_None;
     char value[256] = {};
     VRSettings()->GetString(k_section, key, value, sizeof(value), &err);
-    if (err == VRSettingsError_None)
+    if (SettingRead(key, err))
         out = value;
 }
 
@@ -132,6 +147,8 @@ static Settings LoadSettings()
     std::string wheelMode = "smooth";
     ReadSetting("wheelMode", wheelMode);
     s.wheelSmooth = wheelMode != "step";
+    if (wheelMode != "smooth" && wheelMode != "step")
+        Log("setting wheelMode \"%s\" is not \"smooth\" or \"step\", using smooth\n", wheelMode.c_str());
     ReadSetting("wheelDeflection", s.wheelDeflection);
     ReadSetting("wheelSmoothMin", s.wheelSmoothMin);
     ReadSetting("wheelSmoothImpulse", s.wheelSmoothImpulse);
@@ -140,6 +157,8 @@ static Settings LoadSettings()
     ReadSetting("wheelPressMs", s.wheelPressMs);
     ReadSetting("wheelReleaseMs", s.wheelReleaseMs);
     ReadSetting("wheelMaxQueued", s.wheelMaxQueued);
+    for (const std::string &problem : Validate(s))
+        Log("setting %s\n", problem.c_str());
     return s;
 }
 
@@ -178,8 +197,10 @@ private:
     std::atomic<bool> m_run{false};
     std::thread m_thread;
     int m_fd = -1;
-    bool m_lost = false; // mouse vanished while active; laser mode kept for reconnectGraceS
+    EventStream m_events; // the open device's events
+    bool m_lost = false;  // mouse vanished while active; laser mode kept for reconnectGraceS
     TimePoint m_lostAt;
+    std::set<std::string> m_reported; // skipped mice already logged, as "path name"
 
     // Asks the kernel for a device's name, vendor and capability bitmaps.
     static bool ReadDeviceInfo(int fd, InputDeviceInfo &d)
@@ -198,41 +219,75 @@ private:
         return true;
     }
 
+    // Logs a mouse that was skipped on purpose, once per device, so that a deviceNameFilter that
+    // doesn't match shows up in the log.
+    void ReportSkipped(const std::string &path, const std::string &name, MouseFit fit)
+    {
+        if (fit != MouseFit::ValveDevice && fit != MouseFit::FilteredOut)
+            return;
+        if (!m_reported.insert(path + " " + name).second) // already in the set
+            return;
+        Log("skipped %s (%s): %s\n", path.c_str(), name.c_str(),
+            fit == MouseFit::ValveDevice ? "Valve device" : "name doesn't contain deviceNameFilter");
+    }
+
+    // Looks at every /dev/input/event* node and opens the one RateMouse likes best: a mouse with
+    // the toggle button over one without (on a tie, the first found). False if there is no mouse.
     bool Open()
     {
         DIR *dir = opendir("/dev/input");
         if (!dir)
             return false;
+        int bestFd = -1;
+        MouseFit bestFit = MouseFit::NotAMouse;
+        std::string bestPath, bestName;
         while (dirent *e = readdir(dir)) // NOLINT(concurrency-mt-unsafe): this DIR is used by one thread only
         {
             if (strncmp(e->d_name, "event", 5) != 0)
                 continue;
             std::string path = std::string("/dev/input/") + e->d_name;
-            int fd = open(path.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+            const int fd = open(path.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC);
             if (fd < 0)
                 continue;
             InputDeviceInfo info;
-            if (ReadDeviceInfo(fd, info) && IsWantedMouse(info, m_settings.nameFilter))
+            const MouseFit fit = ReadDeviceInfo(fd, info) ? RateMouse(info, m_settings) : MouseFit::NotAMouse;
+            ReportSkipped(path, info.name, fit);
+            if (fit >= MouseFit::NoToggleButton && fit > bestFit)
             {
-                m_fd = fd;
-                Log("using %s (%s)\n", path.c_str(), info.name.c_str());
-                if (m_out.active && ioctl(m_fd, EVIOCGRAB, 1) < 0)
-                {
-                    Log("EVIOCGRAB failed after reconnect (%s)\n", ErrorText(errno).c_str());
-                    SetActive(false);
-                }
-                else if (m_lost)
-                {
-                    Log("mouse back, laser mode kept\n");
-                }
-                m_lost = false;
-                closedir(dir);
-                return true;
+                if (bestFd >= 0)
+                    close(bestFd);
+                bestFd = fd;
+                bestFit = fit;
+                bestPath = path;
+                bestName = info.name;
             }
-            close(fd);
+            else
+            {
+                close(fd);
+            }
         }
         closedir(dir);
-        return false;
+        if (bestFd < 0)
+            return false;
+
+        m_fd = bestFd;
+        m_events = EventStream(); // a fresh device has nothing pending
+        Log("using %s (%s)\n", bestPath.c_str(), bestName.c_str());
+        if (bestFit == MouseFit::NoToggleButton)
+            Log("WARNING: it has no button %d (toggleButton), so laser mode can't be switched on. "
+                "Set toggleButton, or deviceNameFilter to use another device\n",
+                m_settings.toggleButton);
+        if (m_out.active && ioctl(m_fd, EVIOCGRAB, 1) < 0)
+        {
+            Log("EVIOCGRAB failed after reconnect (%s)\n", ErrorText(errno).c_str());
+            SetActive(false);
+        }
+        else if (m_lost)
+        {
+            Log("mouse back, laser mode kept\n");
+        }
+        m_lost = false;
+        return true;
     }
 
     void Close()
@@ -274,6 +329,16 @@ private:
         Log("%s\n", on ? "ACTIVE (mouse drives the laser)" : "inactive (mouse back to desktop)");
     }
 
+    // The kernel dropped events because this thread fell behind (EventStream). Read the
+    // buttons as they are now, so a lost release doesn't leave one held down.
+    void Resync()
+    {
+        unsigned long keys[BitmapLongs(KEY_MAX)] = {};
+        if (ioctl(m_fd, EVIOCGKEY(sizeof(keys)), keys) >= 0)
+            SyncButtons(m_out, m_settings, keys);
+        Log("events lost (SYN_DROPPED), buttons re-read\n");
+    }
+
     void Loop()
     {
         while (m_run)
@@ -305,8 +370,17 @@ private:
             ssize_t n = 0;
             while ((n = read(m_fd, &ev, sizeof(ev))) == sizeof(ev))
             {
-                if (HandleEvent(m_out, m_settings, ev) == EventAction::Toggle)
+                switch (m_events.Handle(m_out, m_settings, ev))
+                {
+                case EventAction::Toggle:
                     SetActive(!m_out.active);
+                    break;
+                case EventAction::Resync:
+                    Resync();
+                    break;
+                case EventAction::None:
+                    break;
+                }
             }
             if (n < 0 && errno == ENODEV)
             {
@@ -379,9 +453,6 @@ public:
         const std::scoped_lock lock(m_poseMutex); // unlocks when `lock` goes out of scope
         return m_pose;
     }
-
-    uint32_t Id() const { return m_id; }
-    bool Active() const { return m_session.GetPhase() != LaserSession::Phase::Off; }
 
     void RunFrame()
     {
@@ -495,7 +566,6 @@ public:
         // other accessors used throughout this file.
         VR_INIT_SERVER_DRIVER_CONTEXT(ctx);
         Log("version %s\n", k_version);
-        const Settings s = LoadSettings();
         bool enable = true;
         ReadSetting("enable", enable);
         if (!enable)
@@ -503,6 +573,8 @@ public:
             Log("disabled by setting\n");
             return VRInitError_None;
         }
+        const Settings s = LoadSettings();
+        Log("settings: %s\n", Describe(s).c_str());
         // The provider owns the device; SteamVR only borrows the pointer until Cleanup().
         m_device = std::make_unique<MouseLaserDevice>(s);
         if (!VRServerDriverHost()->TrackedDeviceAdded("mouselaser-0", TrackedDeviceClass_Controller, m_device.get()))
@@ -522,15 +594,11 @@ public:
     {
         if (m_device)
             m_device->RunFrame();
-        // Diagnostics: log every event (the first 20 of each type, then every 100th), to find
-        // out whether a driver sees PrimaryDashboardDeviceChanged (525) or focus events.
+        // Empty SteamVR's event queue. The driver needs none of the events: logging them all
+        // (0.5.0 to 0.6.2) showed that none says who owns the laser.
         VREvent_t ev{};
         while (VRServerDriverHost()->PollNextEvent(&ev, sizeof(ev)))
         {
-            unsigned n = ++m_eventCounts[ev.eventType];
-            if (n <= 20 || n % 100 == 0)
-                Log("event %u device %u (%s) #%u\n", ev.eventType, ev.trackedDeviceIndex,
-                    m_device && m_device->Active() ? "active" : "off", n);
         }
     }
 
@@ -540,7 +608,6 @@ public:
 
 private:
     std::unique_ptr<MouseLaserDevice> m_device;
-    std::map<uint32_t, unsigned> m_eventCounts;
 };
 
 // One provider for the lifetime of the loaded .so. It has to be a mutable global: vrserver gets a

@@ -31,8 +31,14 @@ fi
 activated=$(printf '%s\n' "$lines" | grep '^activated as device' | tail -n 1)
 if [ -n "$activated" ]; then report ok "$activated"; else report FAIL "device never activated"; fi
 
+# Settings that couldn't be read or were out of range (the driver corrected them).
+printf '%s\n' "$lines" | sed -n 's/^setting //p' | while IFS= read -r problem; do report warn "setting $problem"; done
+
 mouse=$(printf '%s\n' "$lines" | sed -n 's/^using //p' | tail -n 1)
 if [ -n "$mouse" ]; then report ok "mouse: $mouse"; else report warn "no mouse found yet"; fi
+[ "$(count "^WARNING: it has no button")" -eq 0 ] ||
+    report FAIL "the mouse has no toggle button, so laser mode can't be switched on (see toggleButton)"
+printf '%s\n' "$lines" | sed -n 's/^skipped //p' | sort -u | while IFS= read -r skipped; do report info "skipped $skipped"; done
 
 # Laser mode switches. Every switch-on that reaches the grip pulse needs a matching restore
 # pulse on the way out, or SteamVR's Laser Mouse/Gamepad mode ends up flipped.
@@ -56,5 +62,7 @@ gone=$(count '^mouse gone')
 back=$(count '^mouse back')
 expired=$(count '^mouse still gone')
 [ "$gone" -eq 0 ] || report info "mouse dropped out during laser mode $gone time(s): back in time $back, gave up $expired"
+dropped=$(count '^events lost')
+[ "$dropped" -eq 0 ] || report info "the kernel dropped mouse events $dropped time(s) (buttons were re-read)"
 
 exit "$fail"

@@ -29,7 +29,7 @@ Context for AI coding sessions on this repo. Read it before changing anything.
 ```sh
 cmake -S . -B build -G Ninja && cmake --build build
 ```
-Output: `driver/mouselaser/bin/linuxarm64/driver_mouselaser.so` (gitignored). The only warnings expected come from SteamVR's own `openvr_driver.h` (unused parameters). `build/compile_commands.json` is exported, so clangd can resolve the header.
+Output: `driver/mouselaser/bin/linuxarm64/driver_mouselaser.so` (gitignored; `bin/linux64` when built on an x86_64 PC). No warnings are expected: SteamVR's `openvr_driver.h` is included as a system header, so its own warnings are hidden. `build/compile_commands.json` is exported, so clangd can resolve the header.
 
 Code layout: `src/core.h` holds the logic (no SteamVR, no system calls) and `src/driver.cpp` the I/O. Keep new logic in `core.h` so it can be tested.
 
@@ -41,4 +41,4 @@ Static analysis must stay clean: build with `-DMOUSELASER_WERROR=ON`, and run cl
 
 After a reboot on the headset, `tools/check-log.sh` summarises the driver's log.
 
-Bump `k_version` in `src/driver.cpp` on every behaviour change, so the log (`mouselaser: version ...`) shows which build is running.
+Bump `VERSION` in `project()` in `CMakeLists.txt` on every behaviour change, so the log (`mouselaser: version ...`) shows which build is running. The `resources` test checks that the README and the development log mention the same version.

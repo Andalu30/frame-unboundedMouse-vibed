@@ -75,7 +75,7 @@ KDE may pop up "could not read file `vrmonitor://driverinstalled`". That's harml
 Check that it loaded:
 ```sh
 grep -a 'mouselaser:' ~/.local/share/Steam/logs/vrserver.txt | tail
-# expect: "version 0.6.2-experimental", "activated as device N, role 5", "using /dev/input/eventX (<your mouse>)"
+# expect: "version 0.6.3-experimental", "settings: ...", "activated as device N, role 5", "using /dev/input/eventX (<your mouse>)"
 ```
 Or run `tools/check-log.sh` for a summary (read-only).
 
@@ -85,7 +85,7 @@ Or run `tools/check-log.sh` for a summary (read-only).
 ```
 
 ## Settings
-Add any of these to `~/.config/openvr/config/steamvr.vrsettings` under a `"driver_mouselaser"` section. They are read once, when SteamVR starts.
+Add any of these to `~/.config/openvr/config/steamvr.vrsettings` under a `"driver_mouselaser"` section. They are read once, when SteamVR starts. A value out of its range is corrected and logged as `setting ...`, and the log shows the values in use on a `settings: ...` line.
 
 | key | default | meaning |
 |---|---|---|
@@ -95,7 +95,7 @@ Add any of these to `~/.config/openvr/config/steamvr.vrsettings` under a `"drive
 | `backButton` | `275` | evdev key code that sends the laser Back action while laser mode is on (275 = BTN_SIDE). `-1` disables it. |
 | `role` | `5` | Role while laser mode is off. 5 = stylus (its own `/user/stylus` path, doesn't collide with real controllers, reports itself disconnected while off). 1 = left hand, 2 = right hand: these share the slot with that real controller and stay connected while off, so that controller loses its laser all the time. |
 | `activeRole` | `1` | Role while laser mode is on. 1 = left hand, 2 = right hand: needed to drag overlays (a stylus drag follows your head). `0` keeps `role`. While on, the real controller of that hand loses its laser. |
-| `deviceNameFilter` | `""` | Substring of the evdev mouse name. Empty means the first device with REL_X/REL_Y and BTN_LEFT that isn't a Valve/Steam device. |
+| `deviceNameFilter` | `""` | Substring of the evdev mouse name. Empty means any device with REL_X/REL_Y and BTN_LEFT that isn't a Valve/Steam device, preferring one that has the toggle button. |
 | `claimDelayMs` | `50` | Wait after switching on before pulsing the grip, so SteamVR has picked up the role change. Raise it if the laser sometimes doesn't appear. |
 | `pulseMs` | `60` | Length of the grip and bumper pulses. |
 | `reconnectGraceS` | `60` | If the mouse disappears (e.g. a Bluetooth mouse napping) while laser mode is on, keep laser mode this long and continue when it returns. |
@@ -142,7 +142,6 @@ If SteamVR won't come up properly after installing, there are four options:
 - The ray starts just below your head (`originOffsetY`) and points where you aim, so you see the beam almost end-on. Expect to rely mostly on the cursor dot on overlays.
 - While laser mode is on, the **real controller of the `activeRole` hand loses its laser** (the left one by default; confirmed by the owner). It gets it back when laser mode is switched off. Set `activeRole: 2` to borrow the right hand instead. With `role` 1 or 2 it happens all the time, because a hand role stays connected while off.
 - With a stylus role active (`activeRole: 0`), the mouse laser can aim and click but **can't drag overlays**: they follow your head. SteamVR's compositor only drags with hands or the head.
-- The driver logs SteamVR events (`event N device M (…) #count`) as diagnostics: the first 20 of each type, then every 100th.
 - **Wheel feel is approximate.** A wheel isn't a stick: it only sends notches. Smooth mode only *simulates* a held stick, so it still won't feel exactly like a real thumbstick. Tune it with the `wheel*` settings.
 - Settings are only read when SteamVR starts.
 - **Back doesn't reach the KDE desktop.** SteamVR's laser Back goes to SteamVR overlays. Steam's UI handles it, but gamescope doesn't pass it on to the windows it hosts (a real controller's B behaves the same). With laser mode off, the side buttons don't work in KDE either, because the nested KWin's X11 backend drops X buttons 8 and up. See [docs/steam-frame-background.md](docs/steam-frame-background.md).

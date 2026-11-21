@@ -41,6 +41,15 @@ The clang-tidy pass led to small fixes: thread-safe `strerror_r` for errors logg
 
 The new checks found two cases of drift, both fixed: four settings missing from `default.vrsettings`, and missing or stale input labels. The docs now describe the stylus disconnecting while off, which is what the code has always done. See [testing.md](testing.md). *Headset: not yet tested.*
 
+**0.6.3.** Fixes from the code review, each with unit tests:
+- **Settings are checked.** Out-of-range numbers are clamped, and a role or button that can't work goes back to its default. Example: with `toggleButton: 275`, Back stayed on 275 and could never fire; it's now turned off. Each correction is logged as `setting ...`, a value of the wrong type as "can't be read", and the values in use as one `settings: ...` line.
+- **Mouse choice.** A mouse with the toggle button wins over one without, which matters for receivers that create several mouse-like devices. If the chosen mouse has no toggle button, the log warns that laser mode can't be switched on. Valve devices and mice not matching `deviceNameFilter` are logged once as `skipped`.
+- **Lost events.** When the kernel drops mouse events (`SYN_DROPPED`), the rest of that batch is ignored and the buttons are read again, so a lost release can't leave a click held.
+- **Less log noise.** SteamVR events are no longer logged; 0.6.0 had already found what they could tell. The queue is emptied as before 0.5.0.
+- **Build.** The version is set once, in `CMakeLists.txt`. An x86_64 build goes to `bin/linux64` instead of `bin/linuxarm64`.
+
+`tools/check-log.sh` reports the new lines. *Headset: not yet tested.*
+
 ## State
-- Current version: 0.6.2-experimental, built. The last version tested on the headset is 0.6.1.
+- Current version: 0.6.3-experimental, built. The last version tested on the headset is 0.6.1.
 - Nothing is vendored. The driver builds against SteamVR's bundled `openvr_driver.h`; the tests don't need it.

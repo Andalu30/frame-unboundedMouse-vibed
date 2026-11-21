@@ -20,12 +20,13 @@ vrcompositor
 `steamvr.vrsettings` has `activateMultipleDrivers: false` by default. That setting only limits which **HMD** driver is picked. Drivers whose manifest sets `alwaysActivate` are loaded in addition. This is the standard route for add-on trackers.
 
 ### MouseReader (evdev thread)
-- Scans `/dev/input/event*` for the first device with `EV_REL` (REL_X, REL_Y) and `EV_KEY` (BTN_LEFT), optionally filtered by `deviceNameFilter`. A keyboard's "Consumer Control" node doesn't match.
+- Scans `/dev/input/event*` for devices with `EV_REL` (REL_X, REL_Y) and `EV_KEY` (BTN_LEFT), optionally filtered by `deviceNameFilter`. A keyboard's "Consumer Control" node doesn't match. Valve's emulated mice are skipped unless `deviceNameFilter` is set (logged once as `skipped ...`). A mouse that has the toggle button wins over one that doesn't; otherwise the first one found is used. If the chosen mouse has no toggle button, the log says so (`WARNING: it has no button ...`), because laser mode could never be switched on.
 - `poll()`s with a 200 ms timeout. On `POLLERR`/`POLLHUP` or `ENODEV` (mouse asleep or unplugged) it closes the device and rescans every 2 s.
 - Pressing the toggle key (`toggleButton`, default BTN_EXTRA = 276) flips `active`:
   - **on:** `ioctl(EVIOCGRAB, 1)` gives exclusive access, so gamescope stops receiving the mouse.
   - **off:** `ioctl(EVIOCGRAB, 0)` releases the mouse; button state and deltas are cleared.
 - While active it accumulates `REL_X`/`REL_Y`/`REL_WHEEL` into atomics and tracks BTN_LEFT, BTN_RIGHT and BTN_MIDDLE. `RunFrame` consumes them with `exchange(0)`.
+- If the thread falls behind, the kernel drops events and sends `SYN_DROPPED`. The events up to the next `SYN_REPORT` are then ignored and the buttons are read again with `EVIOCGKEY` (`EventStream` in core.h), so a lost release can't leave a click held. It is logged as `events lost`.
 
 ### RunFrame (pose)
 - HMD pose: `VRServerDriverHost()->GetRawTrackedDevicePoses(0, &hmd, 1)`. Device 0 is the HMD.
@@ -44,8 +45,11 @@ Since 0.5.1 the role changes with laser mode. The device registers with `role` (
 
 SteamVR gives each controller a `/user/...` path based on its role. Hand roles share `/user/hand/left|right` with the real controllers. `TrackedControllerRole_Stylus` (5) maps to `/user/stylus`, which `IsRoleAllowedAsHand()` rules out of hand selection. Treadmill (4) maps to `/user/treadmill`. OptOut (3) has no path unless a tracker role is assigned in SteamVR. The compositor's laser accepts pose sources that aren't hands (the Frame HMD binds `/user/head/pose/raw` to `lasermouse/in/pointer`), so the bindings repeat every hand entry for `/user/stylus`.
 
-### Event diagnostics
-The provider logs SteamVR events about our device, plus user-interaction, role-change and dashboard events (`event N device M (active|off)`). There is no driver-side signal for "the laser is up", and these events are what we're watching to look for one.
+### SteamVR events
+The provider empties SteamVR's event queue every frame and ignores the events. From 0.5.0 to 0.6.2 it logged them, looking for a driver-side signal for "the laser is up". There isn't one: event 525 (dashboard device changed) never reaches drivers. That's why switching on claims the laser explicitly with the grip and bumper pulses.
+
+### Settings
+Read once at startup (`LoadSettings`). `Validate` in core.h then brings every value into a working range: numbers are clamped, and a role or button that can't work goes back to its default (a Back button that clashes with the toggle or a click button is turned off). Each correction is logged as `setting ...`, and the values in use as one `settings: ...` line.
 
 ### RunFrame (inputs)
 | component | driven by | bound to (compositor) |
