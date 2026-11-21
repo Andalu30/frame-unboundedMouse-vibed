@@ -37,6 +37,8 @@ Tests run without a headset (details in [docs/testing.md](docs/testing.md)). Kee
 ```sh
 cmake -S . -B build -DMOUSELASER_TESTS=ON && cmake --build build --target unit_tests wheel_sim && ctest --test-dir build --output-on-failure
 ```
+Static analysis must stay clean: build with `-DMOUSELASER_WERROR=ON`, and run clang-tidy and clang-format 22.1.8 (commands in docs/testing.md). CI (`.github/workflows/ci.yml`) runs all of it on arm64. Don't silence a finding without a `// NOLINT(check): reason`.
+
 After a reboot on the headset, `tools/check-log.sh` summarises the driver's log.
 
 Bump `k_version` in `src/driver.cpp` on every behaviour change, so the log (`mouselaser: version ...`) shows which build is running.

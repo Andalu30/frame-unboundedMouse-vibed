@@ -13,9 +13,18 @@ endif()
 set(OPENVR_HEADERS /opt/steamvr/tools/hellovr_vulkan_linux/src/openvr/headers
     CACHE PATH "Directory containing openvr_driver.h")
 
+# Warnings for our code, for the driver and the tests alike. CI builds with -DMOUSELASER_WERROR=ON.
+option(MOUSELASER_WERROR "Treat warnings as errors" OFF)
+set(MOUSELASER_WARNINGS -Wall -Wextra -Wshadow -Wconversion -Wold-style-cast -Woverloaded-virtual -Wformat=2
+    -Wnull-dereference)
+if(MOUSELASER_WERROR)
+  list(APPEND MOUSELASER_WARNINGS -Werror)
+endif()
+
 add_library(driver_mouselaser SHARED src/driver.cpp)
-target_include_directories(driver_mouselaser PRIVATE ${OPENVR_HEADERS})
-target_compile_options(driver_mouselaser PRIVATE -Wall -Wextra -fvisibility=hidden)
+# SYSTEM: warnings from inside Valve's header are not ours to fix, so the compiler skips them.
+target_include_directories(driver_mouselaser SYSTEM PRIVATE ${OPENVR_HEADERS})
+target_compile_options(driver_mouselaser PRIVATE ${MOUSELASER_WARNINGS} -fvisibility=hidden)
 target_link_libraries(driver_mouselaser PRIVATE pthread)
 set_target_properties(driver_mouselaser PROPERTIES
   PREFIX ""
@@ -59,12 +68,12 @@ if(MOUSELASER_TESTS)
     endif()
   endif()
 
-  add_executable(unit_tests tests/unit_tests.cpp)
+  add_executable(unit_tests tests/unit_tests.cpp tests/doctest_main.cpp)
   add_executable(wheel_sim tools/wheel_sim.cpp) # prints wheel timelines, for tuning; not a test
   foreach(target unit_tests wheel_sim)
     target_include_directories(${target} PRIVATE src)
     target_include_directories(${target} SYSTEM PRIVATE ${doctest_dir}) # no warnings from its header
-    target_compile_options(${target} PRIVATE -Wall -Wextra -Wshadow -Wconversion)
+    target_compile_options(${target} PRIVATE ${MOUSELASER_WARNINGS})
     target_compile_definitions(${target} PRIVATE MOUSELASER_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     target_link_libraries(${target} PRIVATE Threads::Threads)
     if(MOUSELASER_SANITIZE)

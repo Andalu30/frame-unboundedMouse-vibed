@@ -50,7 +50,7 @@ profile = data["resources/input/mouselaser_profile.json"]
 localization = data["resources/localization/localization.json"]
 
 # --- settings --------------------------------------------------------------------------------
-code_keys = set(re.findall(r'Get(?:Float|Int32|Bool|String)\(k_section, "(\w+)"', SOURCE))
+code_keys = set(re.findall(r'\bReadSetting\("(\w+)"', SOURCE))
 readme = (ROOT / "README.md").read_text()
 settings_section = readme.split("\n## Settings", 1)[1].split("\n## ", 1)[0]
 readme_rows = dict(re.findall(r"^\| `(\w+)` \| `([^`]*)` \|", settings_section, re.M))

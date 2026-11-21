@@ -44,7 +44,7 @@ struct Settings
 {
     float sensitivityDeg = 0.05f; // degrees of ray rotation per mouse count
     int toggleButton = BTN_EXTRA;
-    int backButton = BTN_SIDE;    // sends the compositor's laser "back"; -1 = none
+    int backButton = BTN_SIDE; // sends the compositor's laser "back"; -1 = none
     // Stylus (5) gets its own /user/stylus path. A hand role (1/2) shares the slot with the
     // real controller of that hand, so the device disconnects while off (pre-0.5.0 behaviour).
     int role = k_roleStylus;
@@ -64,8 +64,8 @@ struct Settings
     int wheelSmoothDecayMs = 150;    // exponential decay time constant
     int wheelPressMs = 90;
     int wheelReleaseMs = 60;
-    float wheelDeflection = 1.0f;    // maximum deflection (both modes)
-    int wheelMaxQueued = 10;         // notches buffered while flicks are still playing out
+    float wheelDeflection = 1.0f; // maximum deflection (both modes)
+    int wheelMaxQueued = 10;      // notches buffered while flicks are still playing out
     // Laser mode handshake (see LaserSession).
     int claimDelayMs = 50;        // wait after the role change before pulsing (bindings settle)
     int pulseMs = 60;             // length of each grip / bumper pulse
@@ -104,8 +104,8 @@ private:
                 m_mag = 0;
             }
             const auto n = static_cast<float>(std::abs(ticks));
-            const float bumped = m_mag > 0 ? m_mag + s.wheelSmoothImpulse * n
-                                           : s.wheelSmoothMin + s.wheelSmoothImpulse * (n - 1);
+            const float bumped =
+                m_mag > 0 ? m_mag + s.wheelSmoothImpulse * n : s.wheelSmoothMin + s.wheelSmoothImpulse * (n - 1);
             m_mag = std::min(s.wheelDeflection, std::max(bumped, s.wheelSmoothMin));
             m_lastNotch = now;
         }
@@ -305,8 +305,8 @@ public:
         Restore,
         Release
     };
-    static constexpr const char *k_phaseNames[] = {"off", "settle", "grip pulse", "claim pulse",
-                                                   "on", "restore pulse", "release"};
+    static constexpr const char *k_phaseNames[] = {"off", "settle",        "grip pulse", "claim pulse",
+                                                   "on",  "restore pulse", "release"};
     static_assert(sizeof(k_phaseNames) / sizeof(k_phaseNames[0]) == static_cast<std::size_t>(Phase::Release) + 1,
                   "one name per phase");
 
@@ -369,8 +369,7 @@ public:
     // The ray follows the mouse (otherwise it is parked pointing at the sky).
     bool Aiming() const
     {
-        return m_phase == Phase::Settle || m_phase == Phase::Grip || m_phase == Phase::Claim ||
-               m_phase == Phase::On;
+        return m_phase == Phase::Settle || m_phase == Phase::Grip || m_phase == Phase::Claim || m_phase == Phase::On;
     }
     // Mouse buttons and wheel reach SteamVR.
     bool Live(bool want) const { return m_phase == Phase::On && want; }

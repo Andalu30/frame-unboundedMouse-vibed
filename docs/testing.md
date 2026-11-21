@@ -1,6 +1,6 @@
 # Testing
 
-Two layers. **Automated tests** check the driver's logic and its resource files. They need no headset and no SteamVR, and run in well under a second. **Headset checks** cover what only a real SteamVR session can show; they are a script plus a short manual list.
+Three layers. **Automated tests** check the driver's logic and its resource files. They need no headset and no SteamVR, and run in well under a second. **Static analysis** (compiler warnings, clang-tidy, clang-format) checks the code itself. **Headset checks** cover what only a real SteamVR session can show; they are a script plus a short manual list. [CI](../.github/workflows/ci.yml) runs the first two on every push.
 
 ## Automated tests
 
@@ -10,7 +10,7 @@ cmake --build build --target unit_tests wheel_sim
 ctest --test-dir build --output-on-failure
 ```
 
-They work on the headset or on any Linux PC. On a PC, build only the targets above: the driver target expects the OpenVR header and writes its `.so` into `driver/mouselaser/bin/linuxarm64`.
+They work on the headset or on any Linux PC. On a PC, build only the targets above: the driver target needs the OpenVR header (`tools/fetch-openvr-header.sh <dir>` downloads Valve's, then pass `-DOPENVR_HEADERS=<dir>`), and it writes its `.so` into `driver/mouselaser/bin/linuxarm64` whatever the machine.
 
 The first configure downloads [doctest](https://github.com/doctest/doctest) 2.5.3 (a single header, test-only) and checks its SHA-256. If doctest is installed, or you point `-DDOCTEST_INCLUDE_DIR` at a directory containing `doctest/doctest.h`, nothing is downloaded. The driver itself has no dependencies.
 
@@ -36,6 +36,21 @@ Then build and run them as above. Sanitizers apply to the tests only, never to t
 - **A new setting:** add it to `Settings` in `core.h`, `LoadSettings` in `driver.cpp`, `default.vrsettings` and the README table, and add a line to the "Settings defaults" test. The `resources` test fails until the first four agree.
 - **A new input:** create the component in `driver.cpp`, add it to `mouselaser_profile.json` and give it a label in every language in `localization.json`.
 - **A new binding:** add it for the left hand, the right hand and the stylus.
+
+## Static analysis
+
+| Tool | What | Run it |
+|---|---|---|
+| Compiler | `-Wall -Wextra -Wshadow -Wconversion -Wold-style-cast -Woverloaded-virtual -Wformat=2 -Wnull-dereference` on the driver and the tests. `Log()` carries a printf format attribute, so every log call's arguments are checked. Valve's header is included as a system header, so its own warnings are hidden. | Every build. `-DMOUSELASER_WERROR=ON` turns warnings into errors, as CI does. |
+| [clang-tidy](https://clang.llvm.org/extra/clang-tidy/) | Bug patterns, thread safety, the C++ Core Guidelines, modern C++ and readability. [`.clang-tidy`](../.clang-tidy) turns every family on and lists each style rule it turns off, with the reason. [`tests/.clang-tidy`](../tests/.clang-tidy) relaxes a few for test code. A deliberate exception in the code is marked `// NOLINT(check): reason`. | `clang-tidy -p build src/driver.cpp tools/wheel_sim.cpp tests/unit_tests.cpp` (core.h is checked through driver.cpp) |
+| [clang-format](https://clang.llvm.org/docs/ClangFormat.html) | The code style: Allman braces, 4 spaces, 120 columns ([`.clang-format`](../.clang-format)). | Check: `clang-format --dry-run --Werror src/* tests/*.cpp tools/*.cpp`. Fix: the same with `-i`. |
+
+CI pins **clang-tidy and clang-format 22.1.8** (from PyPI). Other versions may report slightly different things. To get the same ones:
+```sh
+python3 -m venv ~/.venv-llvm && ~/.venv-llvm/bin/pip install clang-tidy==22.1.8 clang-format==22.1.8
+```
+
+In VS Code, the [SonarQube for IDE](https://docs.sonarsource.com/sonarqube-for-vs-code/getting-started/running-an-analysis) extension gives a SonarQube-style second opinion. Point it at `build/compile_commands.json`. It's optional, and CI doesn't use it.
 
 ## On the headset
 

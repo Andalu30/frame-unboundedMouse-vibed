@@ -34,7 +34,10 @@ Logging every SteamVR event showed that event 525 (dashboard device changed) nev
 - doctest unit tests, including a randomised check that grip pulses always pair up;
 - a check that the resource files agree with the code and the README;
 - sanitizer builds;
-- `tools/check-log.sh` for the headset.
+- `tools/check-log.sh` for the headset;
+- static analysis: stricter compiler warnings, clang-tidy and clang-format configs, and GitHub Actions CI on arm64 running all of it.
+
+The clang-tidy pass led to small fixes: thread-safe `strerror_r` for errors logged from the mouse thread, the device owned by a `std::unique_ptr`, compiler-checked log formats, and a shorter `LoadSettings`.
 
 The new checks found two cases of drift, both fixed: four settings missing from `default.vrsettings`, and missing or stale input labels. The docs now describe the stylus disconnecting while off, which is what the code has always done. See [testing.md](testing.md). *Headset: not yet tested.*
 

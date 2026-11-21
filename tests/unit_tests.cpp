@@ -5,8 +5,7 @@
 // Time is simulated (tests move a TimePoint forward by hand), so everything runs instantly
 // and gives the same result on every machine.
 
-#define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
-#include <doctest/doctest.h>
+#include <doctest/doctest.h> // main() is in doctest_main.cpp
 
 #include "core.h"
 
@@ -78,7 +77,7 @@ TEST_CASE("switching on: hand role, wait, one grip pulse, one bumper pulse, on")
     sim.Frame(true);
     CHECK(sim.session.GetPhase() == Phase::Settle);
     CHECK(sim.session.Role(sim.s) == k_roleLeftHand); // the hand role comes first...
-    CHECK_FALSE(sim.session.Grip());                   // ...and the grip waits for claimDelayMs
+    CHECK_FALSE(sim.session.Grip());                  // ...and the grip waits for claimDelayMs
 
     sim.Run(true, Ms(500));
     CHECK(sim.entered == std::vector<Phase>{Phase::Settle, Phase::Grip, Phase::Claim, Phase::On});
@@ -219,8 +218,10 @@ Vec RayDirection(const Aim &a) { return Rotate(RayRotation(a), {0, 0, -1}); }
 
 TEST_CASE("the ray starts where the user is looking")
 {
-    const std::vector<Vec> forwards = {{0, 0, -1}, {1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0.3f, 0.4f, -0.866f},
-                                       {-0.5f, -0.5f, 0.707f}, {0.1f, 0.95f, 0.2f}};
+    const std::vector<Vec> forwards = {
+        {0, 0, -1},          {1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0.3f, 0.4f, -0.866f}, {-0.5f, -0.5f, 0.707f},
+        {0.1f, 0.95f, 0.2f},
+    };
     for (Vec f : forwards)
     {
         const float len = std::sqrt(f.x * f.x + f.y * f.y + f.z * f.z);
@@ -428,10 +429,7 @@ InputDeviceInfo Mouse(const std::string &name, unsigned vendor = 0x1234)
     return d;
 }
 
-TEST_CASE("an ordinary mouse is picked")
-{
-    CHECK(IsWantedMouse(Mouse("MCHOSE G3 A Mouse"), ""));
-}
+TEST_CASE("an ordinary mouse is picked") { CHECK(IsWantedMouse(Mouse("MCHOSE G3 A Mouse"), "")); }
 
 TEST_CASE("Valve's emulated mice are skipped unless the name filter asks for them")
 {
@@ -620,9 +618,9 @@ std::map<std::string, std::string> ReadDefaultSettings()
     text << file.rdbuf();
     const std::string str = text.str();
     std::map<std::string, std::string> values;
-    const std::regex pair("\"(\\w+)\"\\s*:\\s*([^,\\n}]+)");
+    const std::regex pair(R"re("(\w+)"\s*:\s*([^,\n}]+))re");
     for (auto it = std::sregex_iterator(str.begin(), str.end(), pair); it != std::sregex_iterator(); ++it)
-        values[(*it)[1]] = std::regex_replace((*it)[2].str(), std::regex("^\\s+|\\s+$|\""), "");
+        values[(*it)[1]] = std::regex_replace((*it)[2].str(), std::regex(R"re(^\s+|\s+$|")re"), "");
     return values;
 }
 

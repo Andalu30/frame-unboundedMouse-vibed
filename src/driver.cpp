@@ -34,9 +34,11 @@
 #include <cstdio>
 #include <cstring>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
 
 #include <dirent.h>
 #include <fcntl.h>
@@ -53,69 +55,92 @@ static_assert(k_roleLeftHand == TrackedControllerRole_LeftHand && k_roleRightHan
               "core.h role numbers must match OpenVR's ETrackedControllerRole");
 
 // `static` at file scope: visible only inside this file, not exported from the .so.
-static const char *k_section = "driver_mouselaser";
-static const char *k_version = "0.6.2-experimental";
+static constexpr const char *k_section = "driver_mouselaser";
+static constexpr const char *k_version = "0.6.2-experimental";
 
 // printf-style logging into vrserver.txt (SteamVR prefixes each line with "mouselaser: ").
-static void Log(const char *fmt, ...)
+// The format attribute makes the compiler check every call's arguments against `fmt`.
+__attribute__((format(printf, 1, 2))) static void Log(const char *fmt, ...)
 {
     char buf[1024];
     va_list args;
     va_start(args, fmt);
-    vsnprintf(buf, sizeof(buf), fmt, args);
+    static_cast<void>(vsnprintf(buf, sizeof(buf), fmt, args)); // a longer message is cut short, which is fine
     va_end(args);
     if (VRDriverLog())
         VRDriverLog()->Log(buf);
 }
 
-// Reads the driver_mouselaser section. SteamVR fills in keys the user didn't set from
-// driver/mouselaser/resources/settings/default.vrsettings; a key missing from both keeps the
-// default from core.h's Settings.
-static void LoadSettings(Settings &out)
+// The text for an errno value. strerror() may share one buffer between threads; strerror_r
+// (the GNU version, which returns the message) doesn't, and the mouse thread logs errors too.
+static std::string ErrorText(int err)
 {
-    EVRSettingsError err;
-    IVRSettings *s = VRSettings();
-    float f = s->GetFloat(k_section, "sensitivity", &err);
-    if (err == VRSettingsError_None) out.sensitivityDeg = f;
-    int32_t i = s->GetInt32(k_section, "toggleButton", &err);
-    if (err == VRSettingsError_None) out.toggleButton = i;
-    i = s->GetInt32(k_section, "backButton", &err);
-    if (err == VRSettingsError_None) out.backButton = i;
-    i = s->GetInt32(k_section, "role", &err);
-    if (err == VRSettingsError_None) out.role = i;
-    i = s->GetInt32(k_section, "activeRole", &err);
-    if (err == VRSettingsError_None) out.activeRole = i;
-    char buf[256] = {};
-    s->GetString(k_section, "deviceNameFilter", buf, sizeof(buf), &err);
-    if (err == VRSettingsError_None) out.nameFilter = buf;
-    f = s->GetFloat(k_section, "originOffsetY", &err);
-    if (err == VRSettingsError_None) out.originOffsetY = f;
-    bool b = s->GetBool(k_section, "invertY", &err);
-    if (err == VRSettingsError_None) out.invertY = b;
-    i = s->GetInt32(k_section, "wheelPressMs", &err);
-    if (err == VRSettingsError_None) out.wheelPressMs = i;
-    i = s->GetInt32(k_section, "wheelReleaseMs", &err);
-    if (err == VRSettingsError_None) out.wheelReleaseMs = i;
-    f = s->GetFloat(k_section, "wheelDeflection", &err);
-    if (err == VRSettingsError_None) out.wheelDeflection = f;
-    i = s->GetInt32(k_section, "wheelMaxQueued", &err);
-    if (err == VRSettingsError_None) out.wheelMaxQueued = i;
-    s->GetString(k_section, "wheelMode", buf, sizeof(buf), &err);
-    if (err == VRSettingsError_None) out.wheelSmooth = strcmp(buf, "step") != 0;
-    f = s->GetFloat(k_section, "wheelSmoothMin", &err);
-    if (err == VRSettingsError_None) out.wheelSmoothMin = f;
-    f = s->GetFloat(k_section, "wheelSmoothImpulse", &err);
-    if (err == VRSettingsError_None) out.wheelSmoothImpulse = f;
-    i = s->GetInt32(k_section, "wheelSmoothHoldMs", &err);
-    if (err == VRSettingsError_None) out.wheelSmoothHoldMs = i;
-    i = s->GetInt32(k_section, "wheelSmoothDecayMs", &err);
-    if (err == VRSettingsError_None) out.wheelSmoothDecayMs = i;
-    i = s->GetInt32(k_section, "claimDelayMs", &err);
-    if (err == VRSettingsError_None) out.claimDelayMs = i;
-    i = s->GetInt32(k_section, "pulseMs", &err);
-    if (err == VRSettingsError_None) out.pulseMs = i;
-    f = s->GetFloat(k_section, "reconnectGraceS", &err);
-    if (err == VRSettingsError_None) out.reconnectGraceS = f;
+    char buf[128] = {};
+    return strerror_r(err, buf, sizeof(buf));
+}
+
+// ReadSetting(key, out) overwrites `out` with the driver_mouselaser value of `key`, if SteamVR has
+// one: set by the user, or else taken from driver/mouselaser/resources/settings/default.vrsettings.
+// Otherwise `out` keeps its default from core.h's Settings. One overload per value type.
+static void ReadSetting(const char *key, float &out)
+{
+    EVRSettingsError err = VRSettingsError_None;
+    const float value = VRSettings()->GetFloat(k_section, key, &err);
+    if (err == VRSettingsError_None)
+        out = value;
+}
+
+static void ReadSetting(const char *key, int &out)
+{
+    EVRSettingsError err = VRSettingsError_None;
+    const int32_t value = VRSettings()->GetInt32(k_section, key, &err);
+    if (err == VRSettingsError_None)
+        out = value;
+}
+
+static void ReadSetting(const char *key, bool &out)
+{
+    EVRSettingsError err = VRSettingsError_None;
+    const bool value = VRSettings()->GetBool(k_section, key, &err);
+    if (err == VRSettingsError_None)
+        out = value;
+}
+
+static void ReadSetting(const char *key, std::string &out)
+{
+    EVRSettingsError err = VRSettingsError_None;
+    char value[256] = {};
+    VRSettings()->GetString(k_section, key, value, sizeof(value), &err);
+    if (err == VRSettingsError_None)
+        out = value;
+}
+
+static Settings LoadSettings()
+{
+    Settings s;
+    ReadSetting("sensitivity", s.sensitivityDeg);
+    ReadSetting("toggleButton", s.toggleButton);
+    ReadSetting("backButton", s.backButton);
+    ReadSetting("role", s.role);
+    ReadSetting("activeRole", s.activeRole);
+    ReadSetting("deviceNameFilter", s.nameFilter);
+    ReadSetting("claimDelayMs", s.claimDelayMs);
+    ReadSetting("pulseMs", s.pulseMs);
+    ReadSetting("reconnectGraceS", s.reconnectGraceS);
+    ReadSetting("originOffsetY", s.originOffsetY);
+    ReadSetting("invertY", s.invertY);
+    std::string wheelMode = "smooth";
+    ReadSetting("wheelMode", wheelMode);
+    s.wheelSmooth = wheelMode != "step";
+    ReadSetting("wheelDeflection", s.wheelDeflection);
+    ReadSetting("wheelSmoothMin", s.wheelSmoothMin);
+    ReadSetting("wheelSmoothImpulse", s.wheelSmoothImpulse);
+    ReadSetting("wheelSmoothHoldMs", s.wheelSmoothHoldMs);
+    ReadSetting("wheelSmoothDecayMs", s.wheelSmoothDecayMs);
+    ReadSetting("wheelPressMs", s.wheelPressMs);
+    ReadSetting("wheelReleaseMs", s.wheelReleaseMs);
+    ReadSetting("wheelMaxQueued", s.wheelMaxQueued);
+    return s;
 }
 
 // Finds the mouse, grabs it while laser mode is on, and feeds its events into a MouseState.
@@ -178,7 +203,7 @@ private:
         DIR *dir = opendir("/dev/input");
         if (!dir)
             return false;
-        while (dirent *e = readdir(dir))
+        while (dirent *e = readdir(dir)) // NOLINT(concurrency-mt-unsafe): this DIR is used by one thread only
         {
             if (strncmp(e->d_name, "event", 5) != 0)
                 continue;
@@ -193,11 +218,13 @@ private:
                 Log("using %s (%s)\n", path.c_str(), info.name.c_str());
                 if (m_out.active && ioctl(m_fd, EVIOCGRAB, 1) < 0)
                 {
-                    Log("EVIOCGRAB failed after reconnect (%s)\n", strerror(errno));
+                    Log("EVIOCGRAB failed after reconnect (%s)\n", ErrorText(errno).c_str());
                     SetActive(false);
                 }
                 else if (m_lost)
+                {
                     Log("mouse back, laser mode kept\n");
+                }
                 m_lost = false;
                 closedir(dir);
                 return true;
@@ -238,7 +265,7 @@ private:
             return;
         if (m_fd >= 0 && ioctl(m_fd, EVIOCGRAB, on ? 1 : 0) < 0 && on)
         {
-            Log("EVIOCGRAB failed (%s), staying inactive\n", strerror(errno));
+            Log("EVIOCGRAB failed (%s), staying inactive\n", ErrorText(errno).c_str());
             return;
         }
         m_out.Clear();
@@ -274,8 +301,8 @@ private:
                 Lost();
                 continue;
             }
-            input_event ev;
-            ssize_t n;
+            input_event ev{};
+            ssize_t n = 0;
             while ((n = read(m_fd, &ev, sizeof(ev))) == sizeof(ev))
             {
                 if (HandleEvent(m_out, m_settings, ev) == EventAction::Toggle)
@@ -296,7 +323,7 @@ private:
 class MouseLaserDevice final : public ITrackedDeviceServerDriver
 {
 public:
-    explicit MouseLaserDevice(const Settings &s) : m_settings(s) {}
+    explicit MouseLaserDevice(Settings s) : m_settings(std::move(s)) {}
 
     EVRInitError Activate(uint32_t id) override
     {
@@ -306,7 +333,8 @@ public:
         VRProperties()->SetStringProperty(c, Prop_ModelNumber_String, "Mouse Laser (virtual)");
         VRProperties()->SetStringProperty(c, Prop_ManufacturerName_String, "frame-unboundedMouse-vibed");
         VRProperties()->SetStringProperty(c, Prop_ControllerType_String, "mouselaser");
-        VRProperties()->SetStringProperty(c, Prop_InputProfilePath_String, "{mouselaser}/input/mouselaser_profile.json");
+        VRProperties()->SetStringProperty(c, Prop_InputProfilePath_String,
+                                          "{mouselaser}/input/mouselaser_profile.json");
         VRProperties()->SetStringProperty(c, Prop_RenderModelName_String, "{mouselaser}mouselaser_none");
         VRProperties()->SetInt32Property(c, Prop_ControllerRoleHint_Int32, m_settings.role);
         m_currentRole = m_settings.role;
@@ -314,18 +342,18 @@ public:
 
         // The inputs SteamVR's bindings can see. Paths must match input/mouselaser_profile.json.
         VRDriverInput()->CreateBooleanComponent(c, "/input/trigger/click", &m_trigger);
-        VRDriverInput()->CreateScalarComponent(c, "/input/trigger/value", &m_triggerValue,
-                                               VRScalarType_Absolute, VRScalarUnits_NormalizedOneSided);
+        VRDriverInput()->CreateScalarComponent(c, "/input/trigger/value", &m_triggerValue, VRScalarType_Absolute,
+                                               VRScalarUnits_NormalizedOneSided);
         VRDriverInput()->CreateBooleanComponent(c, "/input/a/click", &m_a);
         VRDriverInput()->CreateBooleanComponent(c, "/input/b/click", &m_b);
         VRDriverInput()->CreateBooleanComponent(c, "/input/back/click", &m_back);
         VRDriverInput()->CreateBooleanComponent(c, "/input/grip/click", &m_grip);
         VRDriverInput()->CreateBooleanComponent(c, "/input/bumper/click", &m_bumper);
         VRDriverInput()->CreateBooleanComponent(c, "/input/thumbstick/touch", &m_stickTouch);
-        VRDriverInput()->CreateScalarComponent(c, "/input/thumbstick/x", &m_stickX,
-                                               VRScalarType_Absolute, VRScalarUnits_NormalizedTwoSided);
-        VRDriverInput()->CreateScalarComponent(c, "/input/thumbstick/y", &m_stickY,
-                                               VRScalarType_Absolute, VRScalarUnits_NormalizedTwoSided);
+        VRDriverInput()->CreateScalarComponent(c, "/input/thumbstick/x", &m_stickX, VRScalarType_Absolute,
+                                               VRScalarUnits_NormalizedTwoSided);
+        VRDriverInput()->CreateScalarComponent(c, "/input/thumbstick/y", &m_stickY, VRScalarType_Absolute,
+                                               VRScalarUnits_NormalizedTwoSided);
 
         m_mouse.Start(m_settings);
         Log("activated as device %u, role %d\n", id, m_settings.role);
@@ -339,8 +367,8 @@ public:
     }
 
     void EnterStandby() override {}
-    void *GetComponent(const char *) override { return nullptr; }
-    void DebugRequest(const char *, char *resp, uint32_t size) override
+    void *GetComponent(const char * /*componentNameAndVersion*/) override { return nullptr; }
+    void DebugRequest(const char * /*request*/, char *resp, uint32_t size) override
     {
         if (size)
             resp[0] = 0;
@@ -348,7 +376,7 @@ public:
 
     DriverPose_t GetPose() override
     {
-        std::lock_guard<std::mutex> lock(m_poseMutex); // unlocks when `lock` goes out of scope
+        const std::scoped_lock lock(m_poseMutex); // unlocks when `lock` goes out of scope
         return m_pose;
     }
 
@@ -402,7 +430,7 @@ public:
         pose.qRotation.y = q.y;
         pose.qRotation.z = q.z;
         {
-            std::lock_guard<std::mutex> lock(m_poseMutex);
+            const std::scoped_lock lock(m_poseMutex);
             m_pose = pose;
         }
         VRServerDriverHost()->TrackedDevicePoseUpdated(m_id, pose, sizeof(DriverPose_t));
@@ -467,25 +495,24 @@ public:
         // other accessors used throughout this file.
         VR_INIT_SERVER_DRIVER_CONTEXT(ctx);
         Log("version %s\n", k_version);
-        Settings s;
-        LoadSettings(s);
-        EVRSettingsError err;
-        bool enable = VRSettings()->GetBool(k_section, "enable", &err);
-        if (err == VRSettingsError_None && !enable)
+        const Settings s = LoadSettings();
+        bool enable = true;
+        ReadSetting("enable", enable);
+        if (!enable)
         {
             Log("disabled by setting\n");
             return VRInitError_None;
         }
-        m_device = new MouseLaserDevice(s);
-        if (!VRServerDriverHost()->TrackedDeviceAdded("mouselaser-0", TrackedDeviceClass_Controller, m_device))
+        // The provider owns the device; SteamVR only borrows the pointer until Cleanup().
+        m_device = std::make_unique<MouseLaserDevice>(s);
+        if (!VRServerDriverHost()->TrackedDeviceAdded("mouselaser-0", TrackedDeviceClass_Controller, m_device.get()))
             Log("TrackedDeviceAdded failed\n");
         return VRInitError_None;
     }
 
     void Cleanup() override
     {
-        delete m_device;
-        m_device = nullptr;
+        m_device.reset();
         VR_CLEANUP_SERVER_DRIVER_CONTEXT();
     }
 
@@ -497,7 +524,7 @@ public:
             m_device->RunFrame();
         // Diagnostics: log every event (the first 20 of each type, then every 100th), to find
         // out whether a driver sees PrimaryDashboardDeviceChanged (525) or focus events.
-        VREvent_t ev;
+        VREvent_t ev{};
         while (VRServerDriverHost()->PollNextEvent(&ev, sizeof(ev)))
         {
             unsigned n = ++m_eventCounts[ev.eventType];
@@ -512,12 +539,13 @@ public:
     void LeaveStandby() override {}
 
 private:
-    MouseLaserDevice *m_device = nullptr;
+    std::unique_ptr<MouseLaserDevice> m_device;
     std::map<uint32_t, unsigned> m_eventCounts;
 };
 
-// One provider for the lifetime of the loaded .so.
-static MouseLaserProvider g_provider;
+// One provider for the lifetime of the loaded .so. It has to be a mutable global: vrserver gets a
+// pointer to it from HmdDriverFactory and calls into it.
+static MouseLaserProvider g_provider; // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
 // The driver's entry point. vrserver finds it by name with dlsym, so it is exported with C
 // linkage (`extern "C"`: no C++ name mangling) and default visibility (everything else in the

@@ -32,7 +32,12 @@ static void Run(const char *name, bool smooth, const std::map<int, int> &notches
         if (a >= 0.5f)
             above++;
         const int d = std::min(9, static_cast<int>(a * 10));
-        line += a == 0 ? '.' : (v < 0 ? "abcdefghij"[d] : static_cast<char>('0' + d));
+        if (a == 0)
+            line += '.';
+        else if (v < 0)
+            line += "abcdefghij"[d];
+        else
+            line += static_cast<char>('0' + d);
     }
     printf("%-6s %-24s frames>=0.5: %3d\n       %s\n", smooth ? "smooth" : "step", name, above, line.c_str());
 }

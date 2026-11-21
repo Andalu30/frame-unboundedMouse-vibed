@@ -1,0 +1,66 @@
+# SPDX-License-Identifier: MIT
+# Builds the driver, runs the tests and the static analysis on every push and pull request.
+# GitHub's arm64 Linux runners match the Steam Frame's architecture. See docs/testing.md.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: build and test (${{ matrix.name }})
+    runs-on: ubuntu-24.04-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: gcc, cxx: g++, sanitize: "" }
+          - { name: clang, cxx: clang++, sanitize: "" }
+          - { name: asan+ubsan, cxx: clang++, sanitize: "address,undefined" }
+          - { name: tsan, cxx: clang++, sanitize: "thread" }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build g++ clang libclang-rt-18-dev
+      - name: Fetch the OpenVR driver header
+        run: tools/fetch-openvr-header.sh "$RUNNER_TEMP/openvr"
+      - name: Allow sanitizers to map their shadow memory
+        if: matrix.sanitize != ''
+        # Ubuntu's default address-space randomisation is too wide for the sanitizers of clang 18.
+        run: sudo sysctl vm.mmap_rnd_bits=28
+      - name: Configure
+        run: >-
+          cmake -S . -B build -G Ninja -DCMAKE_CXX_COMPILER=${{ matrix.cxx }}
+          -DOPENVR_HEADERS="$RUNNER_TEMP/openvr" -DMOUSELASER_WERROR=ON
+          -DMOUSELASER_TESTS=ON -DMOUSELASER_SANITIZE=${{ matrix.sanitize }}
+      - name: Build
+        run: cmake --build build
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  lint:
+    name: clang-format and clang-tidy
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build g++ python3-venv
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install clang-format==22.1.8 clang-tidy==22.1.8
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+      - name: clang-format
+        run: clang-format --dry-run --Werror src/*.h src/*.cpp tests/*.cpp tools/*.cpp
+      - name: Fetch the OpenVR driver header
+        run: tools/fetch-openvr-header.sh "$RUNNER_TEMP/openvr"
+      - name: Configure (writes compile_commands.json for clang-tidy)
+        run: cmake -S . -B build -G Ninja -DOPENVR_HEADERS="$RUNNER_TEMP/openvr" -DMOUSELASER_TESTS=ON
+      - name: clang-tidy
+        run: clang-tidy -p build --quiet src/driver.cpp tools/wheel_sim.cpp tests/unit_tests.cpp

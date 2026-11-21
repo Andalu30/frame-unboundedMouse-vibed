@@ -1,0 +1,12 @@
+# Tests use the project's checks (../.clang-tidy), minus a few that test code trips by design.
+InheritParentConfig: true
+Checks:
+  # doctest's CHECK macros inflate the score of every test case.
+  - -readability-function-cognitive-complexity
+  # Test constants at file scope; if one threw, the test run would fail anyway.
+  - -bugprone-throwing-static-initialization
+  - -cert-err58-cpp
+  # The fixed random seed is deliberate: the same "random" sequences on every run.
+  - -bugprone-random-generator-seed
+  - -cert-msc32-c
+  - -cert-msc51-cpp
