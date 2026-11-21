@@ -3,7 +3,8 @@
 // unit tested on any Linux machine (tests/unit_tests.cpp). driver.cpp does the I/O: it reads the
 // settings and the mouse, talks to SteamVR, and calls into the pieces below.
 //
-//   Settings      every tunable, with its default; Validate() and Describe() for the log
+//   Settings      every tunable, with its default; Validate() and Describe() for the log,
+//                 ApplyLive() for changes while running
 //   StickStepper  wheel notches -> thumbstick deflection over time
 //   LatchedButton a click shorter than one frame still shows up for one frame
 //   MouseState    what the mouse did since the last frame (shared between threads)
@@ -175,6 +176,46 @@ inline std::string Describe(const Settings &s)
     o << ", wheelReleaseMs " << s.wheelReleaseMs;
     o << ", wheelMaxQueued " << s.wheelMaxQueued;
     return o.str();
+}
+
+// Settings changed while SteamVR runs (on its settings page, or in the file). Copies the ones that
+// can change on the fly from `fresh` into `current`: those used only on vrserver's thread, by
+// RunFrame. Returns the names of the others that differ; they take effect after a SteamVR restart.
+// Those are read by the mouse thread (buttons, device filter, grace time), or they change the
+// device's role, which mid-switch would break the grip pulses' pairing.
+// tests/check_resources.py checks that settingsschema.vrsettings marks exactly these (plus
+// `enable`) as "requires_restart".
+inline std::vector<std::string> ApplyLive(Settings &current, const Settings &fresh)
+{
+    current.sensitivityDeg = fresh.sensitivityDeg;
+    current.originOffsetY = fresh.originOffsetY;
+    current.invertY = fresh.invertY;
+    current.claimDelayMs = fresh.claimDelayMs;
+    current.pulseMs = fresh.pulseMs;
+    current.wheelSmooth = fresh.wheelSmooth;
+    current.wheelSmoothMin = fresh.wheelSmoothMin;
+    current.wheelSmoothImpulse = fresh.wheelSmoothImpulse;
+    current.wheelSmoothHoldMs = fresh.wheelSmoothHoldMs;
+    current.wheelSmoothDecayMs = fresh.wheelSmoothDecayMs;
+    current.wheelPressMs = fresh.wheelPressMs;
+    current.wheelReleaseMs = fresh.wheelReleaseMs;
+    current.wheelDeflection = fresh.wheelDeflection;
+    current.wheelMaxQueued = fresh.wheelMaxQueued;
+
+    std::vector<std::string> needRestart;
+    if (fresh.toggleButton != current.toggleButton)
+        needRestart.emplace_back("toggleButton");
+    if (fresh.backButton != current.backButton)
+        needRestart.emplace_back("backButton");
+    if (fresh.role != current.role)
+        needRestart.emplace_back("role");
+    if (fresh.activeRole != current.activeRole)
+        needRestart.emplace_back("activeRole");
+    if (fresh.nameFilter != current.nameFilter)
+        needRestart.emplace_back("deviceNameFilter");
+    if (fresh.reconnectGraceS != current.reconnectGraceS)
+        needRestart.emplace_back("reconnectGraceS");
+    return needRestart;
 }
 
 // Turns wheel notches on one axis into thumbstick deflection, in "smooth" or "step" mode

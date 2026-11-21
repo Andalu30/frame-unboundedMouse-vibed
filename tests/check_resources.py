@@ -10,6 +10,10 @@ Run by ctest (see CMakeLists.txt), or directly: python3 tests/check_resources.py
 - every binding for the left hand is repeated for the right hand and the stylus;
 - the input profile, the components the code creates and the localization labels match;
 - names and file references between manifest, profile and bindings resolve;
+- the settings page (settingsschema.vrsettings) sets show_without_hmd (or SteamVR hides it), only
+  shows real settings, offers values of the right type including the default, and marks
+  "requires_restart" exactly on the settings that core.h's ApplyLive can't change while running
+  (the README lists the same ones);
 - the version in CMakeLists.txt is the one the README and the development log mention.
 """
 
@@ -22,6 +26,7 @@ ROOT = Path(sys.argv[1] if len(sys.argv) > 1 else Path(__file__).resolve().paren
 DRIVER = ROOT / "driver" / "mouselaser"
 RES = DRIVER / "resources"
 SOURCE = (ROOT / "src" / "driver.cpp").read_text()
+CORE = (ROOT / "src" / "core.h").read_text()
 
 failures = []
 
@@ -108,6 +113,44 @@ for b in profile.get("default_bindings", []):
 model = re.search(r'Prop_RenderModelName_String, "\{mouselaser\}(\w+)"', SOURCE)
 check(model is not None and (RES / "rendermodels" / model.group(1)).is_dir(),
       "render model named in driver.cpp exists under resources/rendermodels")
+
+# --- settings page -------------------------------------------------------------------------------
+def kind(value):
+    return "bool" if isinstance(value, bool) else "number" if isinstance(value, (int, float)) else "string"
+
+
+apply_live = re.search(r"ApplyLive\(.*?return needRestart;", CORE, re.S)
+check(apply_live is not None, "core.h has ApplyLive")
+restart_keys = set(re.findall(r'(?:push|emplace)_back\("(\w+)"\)', apply_live.group(0) if apply_live else "")) | {"enable"}
+schema = data["resources/settings/settingsschema.vrsettings"]
+PREFIX = "/settings/driver_mouselaser/"
+for section in schema:
+    # vrserver tags a driver's section with "driver": <name>, and the dashboard hides such a section
+    # unless that driver runs the headset, or the section sets show_without_hmd (see how-it-works.md).
+    check(section.get("show_without_hmd") is True,
+          f"settings page: section {section.get('title')!r} sets show_without_hmd, or SteamVR hides it")
+    for entry in section["values"]:
+        name = entry.get("name", "")
+        key = name[len(PREFIX):]
+        if not (name.startswith(PREFIX) and key in defaults):
+            check(False, f"settings page: {name} is a setting in default.vrsettings")
+            continue
+        default = defaults[key]
+        if entry.get("control") == "toggle":
+            check(kind(default) == "bool", f"settings page: {key} is a toggle and its default is a bool")
+        if "options" in entry:
+            values = [o["value"] for o in entry["options"]]
+            check(all(kind(v) == kind(default) for v in values) and default in values,
+                  f"settings page: {key} options are {kind(default)}s and include the default {default!r}")
+        check(bool(entry.get("requires_restart")) == (key in restart_keys),
+              f"settings page: {key} {'has' if key in restart_keys else 'has no'} requires_restart, as ApplyLive says")
+        for other in entry.get("requires", {}):
+            check(other[len(PREFIX):] in defaults, f"settings page: {key} requires {other}, a real setting")
+restart_line = next((line for line in readme.splitlines() if "need a SteamVR restart" in line), "")
+readme_restart = set(re.findall(r"`(\w+)`", restart_line))
+check(readme_restart == restart_keys,
+      "README lists the settings that need a restart, as ApplyLive does "
+      f"(only in README: {show(readme_restart - restart_keys)}; only in code: {show(restart_keys - readme_restart)})")
 
 # --- version ---------------------------------------------------------------------------------------
 cmake_version = re.search(r"project\(mouselaser VERSION ([\d.]+)", (ROOT / "CMakeLists.txt").read_text())

@@ -39,7 +39,7 @@ Logging every SteamVR event showed that event 525 (dashboard device changed) nev
 
 The clang-tidy pass led to small fixes: thread-safe `strerror_r` for errors logged from the mouse thread, the device owned by a `std::unique_ptr`, compiler-checked log formats, and a shorter `LoadSettings`.
 
-The new checks found two cases of drift, both fixed: four settings missing from `default.vrsettings`, and missing or stale input labels. The docs now describe the stylus disconnecting while off, which is what the code has always done. See [testing.md](testing.md). *Headset: not yet tested.*
+The new checks found two cases of drift, both fixed: four settings missing from `default.vrsettings`, and missing or stale input labels. The docs now describe the stylus disconnecting while off, which is what the code has always done. See [testing.md](testing.md). *Headset: behaves like 0.6.1. Toggling, aim and click, drag, wheel, Back, the real controllers and unplug/replug all pass, and every activation showed the laser.*
 
 **0.6.3.** Fixes from the code review, each with unit tests:
 - **Settings are checked.** Out-of-range numbers are clamped, and a role or button that can't work goes back to its default. Example: with `toggleButton: 275`, Back stayed on 275 and could never fire; it's now turned off. Each correction is logged as `setting ...`, a value of the wrong type as "can't be read", and the values in use as one `settings: ...` line.
@@ -48,8 +48,16 @@ The new checks found two cases of drift, both fixed: four settings missing from 
 - **Less log noise.** SteamVR events are no longer logged; 0.6.0 had already found what they could tell. The queue is emptied as before 0.5.0.
 - **Build.** The version is set once, in `CMakeLists.txt`. An x86_64 build goes to `bin/linux64` instead of `bin/linuxarm64`.
 
-`tools/check-log.sh` reports the new lines. *Headset: not yet tested.*
+`tools/check-log.sh` reports the new lines. *Headset: behaves like 0.6.2. With the default settings there are no corrections and no unreadable values, so SteamVR does read `default.vrsettings`, and the SteamVR event lines are gone. A real `SYN_DROPPED` happened during the test and the buttons were re-read. A long unplug in laser mode ended it after the 60 s grace time.*
+
+**0.7.0.** Settings page and live settings.
+- `settingsschema.vrsettings` adds a "Mouse Laser" section to SteamVR's settings, the way Babble adds "Expression Tracking": a JSON file SteamVR draws, no UI code. It has sensitivity, invert vertical aim, wheel mode, the laser mode and Back buttons, the laser hand and (advanced) the switch-on delay.
+- Settings changed while running apply within a second: the driver re-reads them on `VREvent_AnyDriverSettingsChanged`, and every second in case drivers don't get that event. The log says which one noticed. Buttons, roles, the device filter and the reconnect grace time still need a SteamVR restart: the mouse thread reads them, or they change the device's role. The page marks them, and the log names them.
+- New checks keep the page, the code and the README in step.
+- The section didn't show at first. vrserver reads the `settingsschema.vrsettings` of every registered driver, disabled ones too, and tags each section with `"driver": <driver name>`. The dashboard hides a tagged section unless that driver runs the headset, or the section sets `show_without_hmd`. Babble's section sets it; ours now does too, and the resource test checks it.
+
+*Headset: the page shows and every control works. Sensitivity, Invert Vertical Aim and Wheel applied live, always noticed by the settings event (never the 1 s check). Laser Hand logged that it needs a restart, and after one the right controller lost its laser while laser mode was on. Choosing the Back button for laser mode turns the Back button off, as the page says.*
 
 ## State
-- Current version: 0.6.3-experimental, built. The last version tested on the headset is 0.6.1.
+- Current version: 0.7.0-experimental, tested on the headset (0.6.2 and 0.6.3 were tested on the way).
 - Nothing is vendored. The driver builds against SteamVR's bundled `openvr_driver.h`; the tests don't need it.

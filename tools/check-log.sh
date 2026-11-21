@@ -62,6 +62,11 @@ gone=$(count '^mouse gone')
 back=$(count '^mouse back')
 expired=$(count '^mouse still gone')
 [ "$gone" -eq 0 ] || report info "mouse dropped out during laser mode $gone time(s): back in time $back, gave up $expired"
+changes=$(count '^settings changed (')
+if [ "$changes" -gt 0 ]; then
+    report info "settings changed $changes time(s) while running: noticed by the settings event $(count '^settings changed (settings event)'), by the 1 s check $(count '^settings changed (1 s check)')"
+fi
+[ "$(count '^settings changed that apply after')" -eq 0 ] || report info "some changed settings apply only after a SteamVR restart"
 dropped=$(count '^events lost')
 [ "$dropped" -eq 0 ] || report info "the kernel dropped mouse events $dropped time(s) (buttons were re-read)"
 
